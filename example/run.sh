@@ -1,0 +1,1 @@
+python TSpec.py --thresholds '\-45:|,\-50:-,\-65:.' --waterfall-height 40 --bins 200 --color-waterfall --color-spectrum --colormap inferno --spectrum-symbol " " --spectrum-symbol-color-background --freq-min 0 --freq-max 500000 --spectrum-height 20 --line-width 3
