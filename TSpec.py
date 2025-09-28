@@ -62,6 +62,12 @@ parser.add_argument(
     help="Strömformat/protokoll, t.ex. 'vita49' (VITA-49), 'raw' (råa IQ-sampel), 'simulator' (simulerade data)"
 )
 
+parser.add_argument(
+    "--custom-colormap",
+    type=str,
+    help="Custom colormap: startcolor,stopcolor,steps. Ex: '#0000FF,#FF0000,64'"
+)
+
 
 
 parser.add_argument("--spectrum-height", type=int, default=20, help="Höjd i rader på spektrumdisplayen")
@@ -105,6 +111,10 @@ if args.thresholds:
 else:
     THRESHOLDS = DEFAULT_THRESHOLDS
 
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    return [int(hex_color[i:i+2], 16)/255.0 for i in (0, 2, 4)]
+
 def clamp_delta(new_vals, old_vals, max_delta):
     """
     Begränsar skillnaden mellan nytt och gammalt värde till ±max_delta.
@@ -127,6 +137,21 @@ def get_colormap_rgb(name="viridis", steps=64):
         for i in range(3):
             rgb[:,i] = np.interp(xnew,x,table[:,i])
         return rgb
+
+    if name == "custom":
+        if(args.custom_colormap):
+            custom_meta = str(args.custom_colormap).split(",")
+            custom_start, custom_stop, _ = custom_meta
+
+            table = np.array([hex_to_rgb(custom_start), hex_to_rgb(custom_stop)])
+            return interp_table(table)
+
+        else:
+            # Warn and use default color theme if not defined
+            name=="viridis"
+            print("WARNING: custom colormap not set!")
+
+        
 
     if name == "viridis":
         table = np.array([
