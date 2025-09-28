@@ -4,6 +4,9 @@ import socket, json, sys, argparse
 import numpy as np
 from collections import deque
 import struct
+import time
+
+last_update = 0.0
 
 # --- Argumentparser ---
 parser = argparse.ArgumentParser(description="Terminalbaserat spektrum och waterfall")
@@ -19,6 +22,33 @@ parser.add_argument("--spectrum-symbol-color-background", action="store_true", h
 parser.add_argument("--freq-min", type=float, default=None, help="Lägsta frekvens i spektrum som ska visas (Hz)")
 parser.add_argument("--freq-max", type=float, default=None, help="Högsta frekvens i spektrum som ska visas (Hz)")
 
+parser.add_argument(
+    "--auto-zoom",
+    action="store_true",
+    help="Beräkna brusgolv och zooma automatiskt till området där signaler finns"
+)
+parser.add_argument(
+    "--auto-zoom-threshold",
+    type=float,
+    default=10.0,
+    help="Hur många dB över brusgolv som räknas som signal (default 10 dB)"
+)
+
+parser.add_argument(
+    "--refresh-rate",
+    type=float,
+    default=None,
+    help="Max uppdateringshastighet i Hz (standard None = så hög som möjligt)."
+)
+
+parser.add_argument(
+    "--max-delta-db",
+    type=float,
+    default=None,
+    help="Maximalt tillåtet hopp i dB per refresh (None = ingen begränsning) (WARNING: detta kräver mer minne!)"
+)
+
+prev_interp = None   
 
 parser.add_argument("--address", type=str, default="127.0.0.1",
                     help="IP-adress eller värdnamn till radioenheten (t.ex. 192.168.1.50)")
@@ -57,8 +87,9 @@ if not args.bar and not args.line:
     args.bar = True
 
 # --- Defaultvärden ---
-DEFAULT_THRESHOLDS = {-50: "|", -72: "-"}
+DEFAULT_THRESHOLDS = { -80: " ", -72: "-",-50: "|"}
 
+THRESHOLDS = None
 # --- Konvertera argument till dict om angivet ---
 if args.thresholds:
     THRESHOLDS = {}
@@ -73,6 +104,14 @@ if args.thresholds:
         THRESHOLDS = DEFAULT_THRESHOLDS
 else:
     THRESHOLDS = DEFAULT_THRESHOLDS
+
+def clamp_delta(new_vals, old_vals, max_delta):
+    """
+    Begränsar skillnaden mellan nytt och gammalt värde till ±max_delta.
+    """
+    diff = new_vals - old_vals
+    diff = np.clip(diff, -max_delta, max_delta)
+    return old_vals + diff
 
 # --- 24-bit RGB colormap ---
 def get_colormap_rgb(name="viridis", steps=64):
@@ -153,7 +192,11 @@ stream_buffers = {}
 stream_metadata = {}
 waterfall = deque(maxlen=args.waterfall_height)
 
-def add_waterfall(power_db):
+def add_waterfall(power_db, freqs=None):
+    """
+    power_db: interpolerat till WIDTH
+    freqs: frekvensvärden för dessa bins (valfritt, behövs bara om du vill göra thresholds dynamiska)
+    """
     row = []
     if args.color_waterfall:
         min_val, max_val = np.min(power_db), np.max(power_db)
@@ -170,7 +213,6 @@ def add_waterfall(power_db):
                     symbol = sym
             row.append(symbol)
     waterfall.append("".join(row))
-
 
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
@@ -246,7 +288,11 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
     num_ticks = 6
     tick_freqs = [f_min + i * (f_max - f_min) / (num_ticks - 1) for i in range(num_ticks)]
     for f in tick_freqs:
-        f_rounded = round(f / 10_000) * 10_000
+        if f >= 10_000:
+            f_rounded = round(f / 10_000) * 10_000
+        else:
+            f_rounded = f
+        
         pos = int((f - f_min) / (f_max - f_min + 1e-12) * (WIDTH - 1))
         label = str(int(f_rounded / 1e3))
         start = max(0, min(6 + pos - len(label)//2, len(label_line) - len(label)))
@@ -264,6 +310,16 @@ def print_waterfall():
         print("      " + row)
 
 def process_iq(iq_data, meta):
+    
+    global prev_interp, last_update, THRESHOLDS
+    
+    if args.refresh_rate is not None:
+        now = time.time()
+        min_interval = 1.0 / args.refresh_rate
+        if now - last_update < min_interval:
+            return          # hoppa över uppdatering
+        last_update = now
+
     N = len(iq_data)
     if N < 2:
         return
@@ -272,13 +328,61 @@ def process_iq(iq_data, meta):
     power_db = 20*np.log10(np.abs(spectrum) + 1e-12)
     power_db -= np.max(power_db)
 
+    
+    # Handle autozoom
+    if args.auto_zoom:
+        # Beräkna brusgolv som t.ex. median + liten marginal
+        noise_floor = np.median(power_db)
+        
+        # Mask för bin där signalen ligger över brus + tröskel
+        signal_mask = power_db > (noise_floor + args.auto_zoom_threshold)
+
+        if np.any(signal_mask):
+            # Få fram första och sista frekvens med signal
+            sig_freqs = freqs[signal_mask]
+            auto_min = sig_freqs.min()
+            auto_max = sig_freqs.max()
+
+            # Lägg gärna på lite “marginal” i båda ändar, t.ex. 5 %
+            span = auto_max - auto_min
+            auto_min -= 0.05 * span
+            auto_max += 0.05 * span
+
+            f_min, f_max = auto_min, auto_max
+        else:
+            # Om ingen signal hittas: visa fullbredd
+            f_min, f_max = freqs[0], freqs[-1]
+
+
+        if THRESHOLDS == DEFAULT_THRESHOLDS:
+            symbols = list(DEFAULT_THRESHOLDS.values())
+            n = len(symbols)
+            
+            signal_mask = (freqs >= f_min) & (freqs <= f_max)
+            power_interval = power_db[signal_mask]
+
+            if len(power_interval) > 0:
+                min_val = np.min(power_interval)
+                max_val = np.max(power_interval)
+
+                # Dela intervallet i n steg
+                step = (max_val - min_val) / n
+                new_thresholds = {}
+                for i, sym in enumerate(symbols):
+                    thresh = min_val + i * step
+                    new_thresholds[int(round(thresh))] = sym
+
+                THRESHOLDS = new_thresholds
+    else:
+        # Använd manuella flaggor eller default
+        f_min = args.freq_min if args.freq_min is not None else freqs[0]
+        f_max = args.freq_max if args.freq_max is not None else freqs[-1]
+
     # Beräkna peak på hela spektrumet
     peak_idx = np.argmax(power_db)
     peak_freq = freqs[peak_idx]
 
-    # Zooma på display
-    f_min = args.freq_min if args.freq_min is not None else freqs[0]
-    f_max = args.freq_max if args.freq_max is not None else freqs[-1]
+    
 
     mask = (freqs >= f_min) & (freqs <= f_max)
     freqs_zoom = freqs[mask]
@@ -293,13 +397,21 @@ def process_iq(iq_data, meta):
     bins = np.linspace(freqs_zoom[0], freqs_zoom[-1], WIDTH)
     interp = np.interp(bins, freqs_zoom, power_zoom)
 
+    # Spara och utför clamp
+    if args.max_delta_db is not None:
+        if prev_interp is None:
+            prev_interp = interp.copy()
+        else:
+            interp = clamp_delta(interp, prev_interp, args.max_delta_db)
+            prev_interp = interp.copy()
+
     # Säkerställ att peak alltid visas
     peak_bin = np.searchsorted(bins, peak_freq)
     if 0 <= peak_bin < WIDTH:
         interp[peak_bin] = max(interp[peak_bin], power_db[peak_idx])
 
     # Resten av displayen som tidigare
-    add_waterfall(interp)
+    add_waterfall(interp, bins)
 
     sys.stdout.write("\x1b[2J\x1b[H")
     mode = "Line" if args.line else "Bar"
@@ -347,15 +459,26 @@ def main():
                     process_iq(iq_data, meta)
 
         elif args.format == "raw":
-            # Hela paketet är IQ-data float32 interleaved
+            # Kolla om paketet är JSON-metadata (börja med '{')
+            try:
+                txt = data.decode("utf-8")
+                if txt.strip().startswith("{"):
+                    meta_json = json.loads(txt)
+                    stream_metadata["raw_stream"] = meta_json
+                    continue   # Vänta på nästa paket med själva IQ
+            except UnicodeDecodeError:
+                pass
+
             iq_arr = np.frombuffer(data, dtype=np.float32).reshape(-1, 2)
-            iq_data = iq_arr[:,0] + 1j*iq_arr[:,1]
-            # Dummy metadata
-            meta = {
+            iq_data = iq_arr[:, 0] + 1j * iq_arr[:, 1]
+
+            # Använd senaste metadata om det finns, annars ett vettigt default
+            meta = stream_metadata.get("raw_stream", {
                 "stream_id": "raw_stream",
-                "center_frequency": args.freq_min or 0,
-                "sample_rate": 1e6
-            }
+                "center_frequency": 0.0,
+                "sample_rate": 48000.0    # fallback
+            })
+
             process_iq(iq_data, meta)
 
         elif args.format == "vita49":
