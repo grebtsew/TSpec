@@ -6,97 +6,95 @@ from collections import deque
 import struct
 import time
 
+# TODO: add logging option
+
 last_update = 0.0
 
-# --- Argumentparser ---
-parser = argparse.ArgumentParser(description="Terminalbaserat spektrum och waterfall")
-parser.add_argument("--thresholds", type=str, help="Trösklar och symboler, t.ex. '-50:|,-72:-,-77:.'")
-parser.add_argument("--waterfall-height", type=int, default=40, help="Max antal rader i waterfall")
-parser.add_argument("--bins", type=int, default=80, help="Antal frekvenspunkter för display (bredd)")
-parser.add_argument("--color-waterfall", action="store_true", help="Visa waterfall i färg istället för symboler")
-parser.add_argument("--color-spectrum", action="store_true", help="Visa spektrum i färg")
-parser.add_argument("--colormap", type=str, default="viridis", help="Colormap för färg: viridis, magma, plasma, inferno")
+# --- Argument parser ---
+parser = argparse.ArgumentParser(description="Terminal-based spectrum and waterfall display")
+parser.add_argument("--thresholds", type=str, help="Thresholds and symbols, e.g., '-50:|,-72:-,-77:.'")
+parser.add_argument("--waterfall-height", type=int, default=40, help="Maximum number of rows in the waterfall")
+parser.add_argument("--bins", type=int, default=80, help="Number of frequency points for display (width)")
+parser.add_argument("--color-waterfall", action="store_true", help="Display waterfall in color instead of symbols")
+parser.add_argument("--color-spectrum", action="store_true", help="Display spectrum in color")
+parser.add_argument("--colormap", type=str, default="viridis", help="Colormap for color: viridis, magma, plasma, inferno")
 parser.add_argument("--spectrum-symbol", type=str, default=".", 
-                    help="Symbol som används för färgat spektrum, default '.'")
-parser.add_argument("--spectrum-symbol-color-background", action="store_true", help="Visa spektrum symbol bakgrundsfärg")
-parser.add_argument("--freq-min", type=float, default=None, help="Lägsta frekvens i spektrum som ska visas (Hz)")
-parser.add_argument("--freq-max", type=float, default=None, help="Högsta frekvens i spektrum som ska visas (Hz)")
+                    help="Symbol used for colored spectrum, default '.'")
+parser.add_argument("--spectrum-symbol-color-background", action="store_true", help="Display spectrum symbol background color")
+parser.add_argument("--freq-min", type=float, default=None, help="Minimum frequency in spectrum to display (Hz)")
+parser.add_argument("--freq-max", type=float, default=None, help="Maximum frequency in spectrum to display (Hz)")
 
 parser.add_argument(
     "--auto-zoom",
     action="store_true",
-    help="Beräkna brusgolv och zooma automatiskt till området där signaler finns"
+    help="Automatically calculate noise floor and zoom to the area where signals exist"
 )
 parser.add_argument(
     "--auto-zoom-threshold",
     type=float,
     default=10.0,
-    help="Hur många dB över brusgolv som räknas som signal (default 10 dB)"
+    help="How many dB above noise floor counts as signal (default 10 dB)"
 )
 
 parser.add_argument(
     "--refresh-rate",
     type=float,
     default=None,
-    help="Max uppdateringshastighet i Hz (standard None = så hög som möjligt)."
+    help="Maximum refresh rate in Hz (default None = as fast as possible)."
 )
 
 parser.add_argument(
     "--max-delta-db",
     type=float,
     default=None,
-    help="Maximalt tillåtet hopp i dB per refresh (None = ingen begränsning) (WARNING: detta kräver mer minne!)"
+    help="Maximum allowed jump in dB per refresh (None = no limit) (WARNING: this requires more memory!)"
 )
 
-prev_interp = None   
-
 parser.add_argument("--address", type=str, default="127.0.0.1",
-                    help="IP-adress eller värdnamn till radioenheten (t.ex. 192.168.1.50)")
+                    help="IP address or hostname of the radio device (e.g., 192.168.1.50)")
 parser.add_argument("--port", type=int, default=5005,
-                    help="TCP/UDP-port för anslutning till radioenheten")
+                    help="TCP/UDP port for connecting to the radio device")
 parser.add_argument(
     "--format",
     type=str,
     choices=["vita49", "raw", "simulator"],
     default="vita49",
-    help="Strömformat/protokoll, t.ex. 'vita49' (VITA-49), 'raw' (råa IQ-sampel), 'simulator' (simulerade data)"
+    help="Stream format/protocol, e.g., 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)"
 )
 
 parser.add_argument(
     "--custom-colormap",
     type=str,
-    help="Custom colormap: startcolor,stopcolor,steps. Ex: '#0000FF,#FF0000,64'"
+    help="Custom colormap: startcolor,stopcolor,steps. Example: '#0000FF,#FF0000,64'"
 )
 
+parser.add_argument("--spectrum-height", type=int, default=20, help="Height in rows of the spectrum display")
 
-
-parser.add_argument("--spectrum-height", type=int, default=20, help="Höjd i rader på spektrumdisplayen")
-
-
-# --- Nya argument: endera bar eller line, och line-width (vertikal) ---
+# --- New arguments: either bar or line mode, and line-width (vertical) ---
 parser.add_argument("--bar", action="store_true",
-                    help="Visa spektrum i stapel-läge (standard).")
+                    help="Display spectrum in bar mode (default).")
 parser.add_argument("--line", action="store_true",
-                    help="Visa spektrum i linje-läge (konturlinje).")
+                    help="Display spectrum in line mode (contour line).")
 parser.add_argument("--line-width", type=int, default=1,
-                    help="Vertikal tjocklek (antal rader) på linjen i line-läge. 1 = en rad.")
+                    help="Vertical thickness (number of rows) of the line in line mode. 1 = one row.")
+
+prev_interp = None   
 
 args = parser.parse_args()
 
 if args.freq_min is not None and args.freq_max is not None:
     if args.freq_min >= args.freq_max:
-        print(f"Fel: --freq-min ({args.freq_min}) måste vara mindre än --freq-max ({args.freq_max})")
+        print(f"WARNING: --freq-min ({args.freq_min}) has to be less then --freq-max ({args.freq_max})")
         sys.exit(1)
 
-# Default: bar-läge om inget anges
+# Default: bar-mode 
 if not args.bar and not args.line:
     args.bar = True
 
-# --- Defaultvärden ---
+# --- Defaultvalues ---
 DEFAULT_THRESHOLDS = { -80: " ", -72: "-",-50: "|"}
 
 THRESHOLDS = None
-# --- Konvertera argument till dict om angivet ---
 if args.thresholds:
     THRESHOLDS = {}
     try:
@@ -209,7 +207,7 @@ def get_colormap_rgb(name="viridis", steps=64):
 COLORMAP_RGB = get_colormap_rgb(args.colormap)
 
 # --- Konstanter ---
-BUFFER_SIZE = 8192
+BUFFER_SIZE = 65535
 WIDTH = args.bins
 HEIGHT = 20
 
@@ -226,7 +224,11 @@ def add_waterfall(power_db, freqs=None):
     if args.color_waterfall:
         min_val, max_val = np.min(power_db), np.max(power_db)
         norm = (power_db - min_val) / (max_val - min_val + 1e-12)
+        norm = np.nan_to_num(norm, nan=0.0, posinf=1.0, neginf=0.0)  # convert NaN/inf to valid numbers
+        norm = np.clip(norm, 0.0, 1.0)
+
         for n in norm:
+            
             r, g, bb = COLORMAP_RGB[int(n*(len(COLORMAP_RGB)-1))]
             row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
     else:
@@ -307,30 +309,46 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
 
         rows.append("".join(row))
 
-    # Tick-linje och etiketter
+    # Tick-linje och etiketter med dynamisk enhet
     tick_line = "      " + "-" * WIDTH
     label_line = [" "] * (WIDTH + 6)
     num_ticks = 6
     tick_freqs = [f_min + i * (f_max - f_min) / (num_ticks - 1) for i in range(num_ticks)]
+
+    # Välj enhet dynamiskt
+    span = f_max - f_min
+    span = max(span,f_max,f_min)
+    if span >= 1e6:
+        unit = "MHz"
+        scale = 1e6
+    elif span >= 1e3:
+        unit = "kHz"
+        scale = 1e3
+    else:
+        unit = "Hz"
+        scale = 1.0
+
     for f in tick_freqs:
-        if f >= 10_000:
-            f_rounded = round(f / 10_000) * 10_000
+        f_scaled = f / scale
+        # Avrunda för läsbarhet
+        if unit == "Hz":
+            f_rounded = int(round(f_scaled))
         else:
-            f_rounded = f
-        
+            f_rounded = round(f_scaled, 2)
+        label = str(f_rounded)
+
         pos = int((f - f_min) / (f_max - f_min + 1e-12) * (WIDTH - 1))
-        label = str(int(f_rounded / 1e3))
         start = max(0, min(6 + pos - len(label)//2, len(label_line) - len(label)))
         for j, ch in enumerate(label):
             label_line[start + j] = ch
 
     rows.append(tick_line)
-    rows.append("".join(label_line) + " kHz")
+    rows.append("".join(label_line) + f" {unit}")
     return "\n".join(rows)
 
 
 def print_waterfall():
-    print(f"Waterfall (nyast överst, översättning {THRESHOLDS}, max höjd {args.waterfall_height}):")
+    print(f"Waterfall (Symbols {THRESHOLDS}, max height {args.waterfall_height}):")
     for row in reversed(waterfall):
         print("      " + row)
 
@@ -348,12 +366,22 @@ def process_iq(iq_data, meta):
     N = len(iq_data)
     if N < 2:
         return
-    spectrum = np.fft.fft(iq_data)[:N//2]
-    freqs = np.fft.fftfreq(N, 1/meta["sample_rate"])[:N//2]
+    
+    # FFT och frekvensaxel
+    spectrum = np.fft.fftshift(np.fft.fft(iq_data))
+    freqs = np.fft.fftshift(np.fft.fftfreq(N, 1/meta["sample_rate"]))
+
+    # Lägg till center frequency från metadata
+    freqs += meta["center_frequency"]
     power_db = 20*np.log10(np.abs(spectrum) + 1e-12)
     power_db -= np.max(power_db)
 
     
+    # Använd manuella flaggor eller default
+    f_min = args.freq_min if args.freq_min is not None else freqs[0]
+    f_max = args.freq_max if args.freq_max is not None else freqs[-1]
+
+
     # Handle autozoom
     if args.auto_zoom:
         # Beräkna brusgolv som t.ex. median + liten marginal
@@ -398,11 +426,8 @@ def process_iq(iq_data, meta):
                     new_thresholds[int(round(thresh))] = sym
 
                 THRESHOLDS = new_thresholds
-    else:
-        # Använd manuella flaggor eller default
-        f_min = args.freq_min if args.freq_min is not None else freqs[0]
-        f_max = args.freq_max if args.freq_max is not None else freqs[-1]
-
+    
+    
     # Beräkna peak på hela spektrumet
     peak_idx = np.argmax(power_db)
     peak_freq = freqs[peak_idx]
@@ -453,95 +478,109 @@ def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.address, args.port))
     print(f"Lyssnar på UDP {args.address}:{args.port}")
+    
     print(f"Expecting format: {args.format}")
-    while True:
-        data, _ = sock.recvfrom(BUFFER_SIZE)
-
-        if args.format == "simulator":
-            # --- tidigare simulator-läsare ---
+    try:
+        sock.settimeout(3.0)  
+        while True:
             try:
-                meta = json.loads(data.decode("utf-8"))
-                stream_id = meta["stream_id"]
-                stream_metadata[stream_id] = meta
-                stream_buffers[stream_id] = {}
-            except (UnicodeDecodeError, json.JSONDecodeError):
+                data, _ = sock.recvfrom(BUFFER_SIZE)
+            except socket.timeout:
+                continue  
+
+        
+            if args.format == "simulator":
+                # --- simulator ---
                 try:
-                    stream_id = data[:16].decode("utf-8").strip()
-                except Exception:
+                    meta = json.loads(data.decode("utf-8"))
+                    stream_id = meta["stream_id"]
+                    stream_metadata[stream_id] = meta
+                    stream_buffers[stream_id] = {}
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    try:
+                        stream_id = data[:16].decode("utf-8").strip()
+                    except Exception:
+                        continue
+                    pkt_no = int.from_bytes(data[16:20], 'big')
+                    payload = data[20:]
+                    if stream_id not in stream_buffers:
+                        continue
+                    stream_buffers[stream_id][pkt_no] = payload
+                    expected = stream_metadata[stream_id]["packet_count"]
+                    if len(stream_buffers[stream_id]) == expected:
+                        iq_bytes = b"".join(stream_buffers[stream_id][i] for i in range(expected))
+                        iq_arr = np.frombuffer(iq_bytes, dtype=np.float32).reshape(-1, 2)
+                        iq_data = iq_arr[:,0] + 1j*iq_arr[:,1]
+                        meta = stream_metadata.pop(stream_id)
+                        stream_buffers.pop(stream_id)
+                        process_iq(iq_data, meta)
+
+            elif args.format == "raw":
+                # Check for json start
+                try:
+                    txt = data.decode("utf-8")
+                    if txt.strip().startswith("{"):
+                        meta_json = json.loads(txt)
+                        stream_metadata["raw_stream"] = meta_json
+                        continue   # Await next package with IQ data
+                except UnicodeDecodeError:
+                    pass
+
+                iq_arr = np.frombuffer(data, dtype=np.float32).reshape(-1, 2)
+                iq_data = iq_arr[:, 0] + 1j * iq_arr[:, 1]
+
+                # Use latest metadat if exist
+                meta = stream_metadata.get("raw_stream", {
+                    "stream_id": "raw_stream",
+                    "center_frequency": 0.0,
+                    "sample_rate": 48000.0    # fallback
+                })
+
+                process_iq(iq_data, meta)
+
+            elif args.format == "vita49":
+                parsed = parse_vita49_packet(data)
+                if parsed is None:
                     continue
-                pkt_no = int.from_bytes(data[16:20], 'big')
-                payload = data[20:]
-                if stream_id not in stream_buffers:
-                    continue
-                stream_buffers[stream_id][pkt_no] = payload
-                expected = stream_metadata[stream_id]["packet_count"]
-                if len(stream_buffers[stream_id]) == expected:
-                    iq_bytes = b"".join(stream_buffers[stream_id][i] for i in range(expected))
-                    iq_arr = np.frombuffer(iq_bytes, dtype=np.float32).reshape(-1, 2)
-                    iq_data = iq_arr[:,0] + 1j*iq_arr[:,1]
-                    meta = stream_metadata.pop(stream_id)
-                    stream_buffers.pop(stream_id)
-                    process_iq(iq_data, meta)
 
-        elif args.format == "raw":
-            # Kolla om paketet är JSON-metadata (börja med '{')
-            try:
-                txt = data.decode("utf-8")
-                if txt.strip().startswith("{"):
-                    meta_json = json.loads(txt)
-                    stream_metadata["raw_stream"] = meta_json
-                    continue   # Vänta på nästa paket med själva IQ
-            except UnicodeDecodeError:
-                pass
+                stream_id, pkt_no, sample_rate, center_freq, payload = parsed
 
-            iq_arr = np.frombuffer(data, dtype=np.float32).reshape(-1, 2)
-            iq_data = iq_arr[:, 0] + 1j * iq_arr[:, 1]
+                # payload är bara IQ-data, headern är redan separerad
+                # Se till att ignorera headern om parse_vita49_packet returnerar hela paketet
+                if len(payload) % 8 != 0:
+                    print(f"Payload size {len(payload)} not divisible by 8, trimming extra bytes")
+                    payload = payload[:len(payload)//8*8]  # klipp bort extra byte
 
-            # Använd senaste metadata om det finns, annars ett vettigt default
-            meta = stream_metadata.get("raw_stream", {
-                "stream_id": "raw_stream",
-                "center_frequency": 0.0,
-                "sample_rate": 48000.0    # fallback
-            })
-
-            process_iq(iq_data, meta)
-
-        elif args.format == "vita49":
-            # --- Enkel VITA-49 läsare ---
-            if len(data) < 32:
-                continue  # för kort paket
-            header = data[:32]
-            payload = data[32:]
-
-            try:
-                stream_id = header[:16].decode("utf-8").strip()
-                pkt_no = int.from_bytes(header[16:20], 'big')
-                sample_rate = struct.unpack(">f", header[20:24])[0]
-                center_freq = struct.unpack(">f", header[24:28])[0]
-            except Exception as e:
-                print("WARNING: threw package {e}")
-                continue
-
-            # buffra per stream
-            if stream_id not in stream_buffers:
-                stream_buffers[stream_id] = {}
-            stream_buffers[stream_id][pkt_no] = payload
-
-            # här behöver vi bestämma packet_count, exempelvis första paketet = 1
-            expected = max(stream_buffers[stream_id].keys()) + 1  # enklare approximation
-            if len(stream_buffers[stream_id]) == expected:
-                iq_bytes = b"".join(stream_buffers[stream_id][i] for i in range(expected))
-                iq_arr = np.frombuffer(iq_bytes, dtype=np.float32).reshape(-1, 2)
+                # Tolka IQ-data som float32 little-endian interleaved
+                iq_arr = np.frombuffer(payload, dtype='<f4').reshape(-1, 2)
                 iq_data = iq_arr[:,0] + 1j*iq_arr[:,1]
+
                 meta = {
-                    "stream_id": stream_id,
+                    "stream_id": stream_id.hex(),
                     "center_frequency": center_freq,
                     "sample_rate": sample_rate
                 }
-                # rensa bufferten
-                stream_buffers.pop(stream_id)
+                
                 process_iq(iq_data, meta)
+    except KeyboardInterrupt:
+        print("\nAvslutar mottagare...")
+    finally:
+        sock.close()
 
+
+def parse_vita49_packet(data: bytes):
+    if len(data) < 32:
+        return None
+    header = data[:32]
+    payload = data[32:]
+
+    hdr_word0 = struct.unpack("<I", header[:4])[0]
+    stream_id = header[4:20]
+    pkt_no = struct.unpack("<I", header[20:24])[0]
+    sample_rate = struct.unpack("<f", header[24:28])[0]
+    center_freq = struct.unpack("<f", header[28:32])[0]
+
+    return stream_id, pkt_no, sample_rate, center_freq, payload
 
 if __name__ == "__main__":
     main()
