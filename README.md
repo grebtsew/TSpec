@@ -11,18 +11,19 @@ handle many formats and systems
 
 
 TODO:
-microphone example
-gnuradio example and network update
 
-docker for pyinstaller
+
+# TODO: add logging option
+
 windows pyinstaller
 pyinstaller script...
 
+unit tests
+format black
 ci-cd
 
 create demo gif
 update readme
-
 
 changelog
 create release

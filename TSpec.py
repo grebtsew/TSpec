@@ -6,7 +6,6 @@ from collections import deque
 import struct
 import time
 
-# TODO: add logging option
 
 last_update = 0.0
 
