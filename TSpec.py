@@ -272,7 +272,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
                     r, g, bb = COLORMAP_RGB[base_idx]
 
                     if half > 0:
-                        fade = 1.0 - 0.25 * dist / (half + 1e-12)
+                        fade = 1.0 - 0.1 * dist / (half + 1e-12)
                     else:
                         fade = 1.0
 
