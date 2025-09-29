@@ -1,0 +1,8 @@
+version: "3.9"
+
+services:
+  tspec:
+    build: .
+    container_name: tspec
+    restart: unless-stopped
+    network_mode: "host"   # if you need access to local network (like UDP sockets)
