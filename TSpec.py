@@ -5,108 +5,20 @@ import numpy as np
 from collections import deque
 import struct
 import time
-
+import logging
 
 last_update = 0.0
 
-# --- Argument parser ---
-parser = argparse.ArgumentParser(description="Terminal-based spectrum and waterfall display")
-parser.add_argument("--thresholds", type=str, help="Thresholds and symbols, e.g., '-50:|,-72:-,-77:.'")
-parser.add_argument("--waterfall-height", type=int, default=40, help="Maximum number of rows in the waterfall")
-parser.add_argument("--bins", type=int, default=80, help="Number of frequency points for display (width)")
-parser.add_argument("--color-waterfall", action="store_true", help="Display waterfall in color instead of symbols")
-parser.add_argument("--color-spectrum", action="store_true", help="Display spectrum in color")
-parser.add_argument("--colormap", type=str, default="viridis", help="Colormap for color: viridis, magma, plasma, inferno")
-parser.add_argument("--spectrum-symbol", type=str, default=".", 
-                    help="Symbol used for colored spectrum, default '.'")
-parser.add_argument("--spectrum-symbol-color-background", action="store_true", help="Display spectrum symbol background color")
-parser.add_argument("--freq-min", type=float, default=None, help="Minimum frequency in spectrum to display (Hz)")
-parser.add_argument("--freq-max", type=float, default=None, help="Maximum frequency in spectrum to display (Hz)")
-
-parser.add_argument(
-    "--auto-zoom",
-    action="store_true",
-    help="Automatically calculate noise floor and zoom to the area where signals exist"
-)
-parser.add_argument(
-    "--auto-zoom-threshold",
-    type=float,
-    default=10.0,
-    help="How many dB above noise floor counts as signal (default 10 dB)"
-)
-
-parser.add_argument(
-    "--refresh-rate",
-    type=float,
-    default=None,
-    help="Maximum refresh rate in Hz (default None = as fast as possible)."
-)
-
-parser.add_argument(
-    "--max-delta-db",
-    type=float,
-    default=None,
-    help="Maximum allowed jump in dB per refresh (None = no limit) (WARNING: this requires more memory!)"
-)
-
-parser.add_argument("--address", type=str, default="127.0.0.1",
-                    help="IP address or hostname of the radio device (e.g., 192.168.1.50)")
-parser.add_argument("--port", type=int, default=5005,
-                    help="TCP/UDP port for connecting to the radio device")
-parser.add_argument(
-    "--format",
-    type=str,
-    choices=["vita49", "raw", "simulator"],
-    default="vita49",
-    help="Stream format/protocol, e.g., 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)"
-)
-
-parser.add_argument(
-    "--custom-colormap",
-    type=str,
-    help="Custom colormap: startcolor,stopcolor,steps. Example: '#0000FF,#FF0000,64'"
-)
-
-parser.add_argument("--spectrum-height", type=int, default=20, help="Height in rows of the spectrum display")
-
-# --- New arguments: either bar or line mode, and line-width (vertical) ---
-parser.add_argument("--bar", action="store_true",
-                    help="Display spectrum in bar mode (default).")
-parser.add_argument("--line", action="store_true",
-                    help="Display spectrum in line mode (contour line).")
-parser.add_argument("--line-width", type=int, default=1,
-                    help="Vertical thickness (number of rows) of the line in line mode. 1 = one row.")
-
-prev_interp = None   
-
-args = parser.parse_args()
-
-if args.freq_min is not None and args.freq_max is not None:
-    if args.freq_min >= args.freq_max:
-        print(f"WARNING: --freq-min ({args.freq_min}) has to be less then --freq-max ({args.freq_max})")
-        sys.exit(1)
-
-# Default: bar-mode 
-if not args.bar and not args.line:
-    args.bar = True
+stored_iq = []
+stored_meta = None
+args = None
 
 # --- Defaultvalues ---
 DEFAULT_THRESHOLDS = { -80: " ", -72: "-",-50: "|"}
 
 THRESHOLDS = None
-if args.thresholds:
-    THRESHOLDS = {}
-    try:
-        pairs = args.thresholds.split(",")
-        for p in pairs:
-            key, sym = p.split(":")
-            key = key.replace("\\", "")
-            THRESHOLDS[int(key)] = sym
-    except Exception as e:
-        print(f"Fel i thresholds-argument, använder default: {e}")
-        THRESHOLDS = DEFAULT_THRESHOLDS
-else:
-    THRESHOLDS = DEFAULT_THRESHOLDS
+
+
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip("#")
@@ -146,7 +58,7 @@ def get_colormap_rgb(name="viridis", steps=64):
         else:
             # Warn and use default color theme if not defined
             name=="viridis"
-            print("WARNING: custom colormap not set!")
+            logging.warning("WARNING: custom colormap not set!")
 
         
 
@@ -200,19 +112,19 @@ def get_colormap_rgb(name="viridis", steps=64):
         return interp_table(table)
 
     else:
-        print(f"Okänd colormap '{name}', använder viridis")
+        logging.warning(f"Okänd colormap '{name}', använder viridis")
         return get_colormap_rgb("viridis", steps)
 
-COLORMAP_RGB = get_colormap_rgb(args.colormap)
+COLORMAP_RGB = None
 
 # --- Konstanter ---
 BUFFER_SIZE = 65535
-WIDTH = args.bins
+WIDTH = 80
 HEIGHT = 20
 
 stream_buffers = {}
 stream_metadata = {}
-waterfall = deque(maxlen=args.waterfall_height)
+waterfall = None
 
 def add_waterfall(power_db, freqs=None):
     """
@@ -268,14 +180,20 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
         if args.line:
             for i, b in enumerate(bars):
                 dist = abs(h - b)
-                if dist <= half:
+                b_left = bars[i-1] if i > 0 else b
+                b_right = bars[i+1] if i < len(bars)-1 else b
+
+                # Kontroll: linjen + fyllning mellan bin
+                if dist <= half or (b_left <= h <= b) or (b_right <= h <= b):
                     base_idx = int(levels[i] * (len(COLORMAP_RGB) - 1))
                     r, g, bb = COLORMAP_RGB[base_idx]
 
+                    # Fade beräknas utifrån vertikalt avstånd till linjens topp
+                    vertical_dist = max(0, b - h) # avstånd neråt
+                    fade = 1.0
                     if half > 0:
-                        fade = 1.0 - 0.1 * dist / (half + 1e-12)
-                    else:
-                        fade = 1.0
+                        fade = 1.0 - 0.1 * min(dist, vertical_dist) / (half + 1e-12)
+                        fade = max(0.1, fade)  # säkerställ minst lite ljus
 
                     r_f = int(r * 255 * fade + 255 * (1 - fade))
                     g_f = int(g * 255 * fade + 255 * (1 - fade))
@@ -290,6 +208,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
                         row.append(symbol)
                 else:
                     row.append(" ")
+
         else:
             # vanliga staplar
             for i, b in enumerate(bars):
@@ -346,14 +265,57 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
     return "\n".join(rows)
 
 
+
+
 def print_waterfall():
     print(f"Waterfall (Symbols {THRESHOLDS}, max height {args.waterfall_height}):")
     for row in reversed(waterfall):
         print("      " + row)
 
-def process_iq(iq_data, meta):
+
+def load_iq_from_file():
+    path = args.load
+    print(f"Läser IQ-data från {path} ...")
+
+    with open(path, "rb") as f:
+        while True:
+            # Läs metadata (en rad JSON)
+            meta_line = f.readline()
+            if not meta_line:
+                break  # EOF
+
+            try:
+                meta_str = meta_line.decode("utf-8", errors="ignore").strip()
+                meta = json.loads(meta_str)
+            except json.JSONDecodeError:
+                print("DEBUG: Kunde inte tolka metadata, hoppar över block")
+                continue
+                
+            
+            num_samples = meta.get("num_samples")
+            if num_samples is None:
+                print("DEBUG: num_samples saknas, hoppar över block")
+                continue
+
+            # Läs IQ-data
+            iq_bytes = f.read(num_samples * 2 * 4)
+            if len(iq_bytes) < num_samples * 2 * 4:
+                print("DEBUG: EOF innan block var komplett")
+                break
+
+            iq_arr = np.frombuffer(iq_bytes, dtype=np.float32).reshape(-1,2)
+            iq_data = iq_arr[:,0] + 1j*iq_arr[:,1]
+
+            process_iq(iq_data, meta)
+            time.sleep(args.refresh_rate)
+
+
+
+
     
-    global prev_interp, last_update, THRESHOLDS
+
+def process_iq(iq_data, meta):
+    global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta 
     
     if args.refresh_rate is not None:
         now = time.time()
@@ -366,6 +328,20 @@ def process_iq(iq_data, meta):
     if N < 2:
         return
     
+    # Spara om --store är aktiverat
+    if args.store:
+        
+        meta_copy = meta.copy()
+        meta_copy["num_samples"] = len(iq_data)
+        
+        meta_json = json.dumps(meta_copy)
+        store_file.write(meta_json.encode("utf-8") + b"\n")
+        # Skriv block direkt till fil
+        iq_arr = np.zeros((len(iq_data), 2), dtype=np.float32)
+        iq_arr[:,0] = np.real(iq_data)
+        iq_arr[:,1] = np.imag(iq_data)
+        store_file.write(iq_arr.tobytes())
+
     # FFT och frekvensaxel
     spectrum = np.fft.fftshift(np.fft.fft(iq_data))
     freqs = np.fft.fftshift(np.fft.fftfreq(N, 1/meta["sample_rate"]))
@@ -467,15 +443,29 @@ def process_iq(iq_data, meta):
     extra = f"  LineWidth: {args.line_width}" if args.line else ""
     print(f"Stream {meta.get('stream_id','-')}  CF {meta.get('center_frequency',0)/1e6:.3f} MHz  "
           f"SR {meta.get('sample_rate',0)/1e6:.2f} Msps  Peak: {peak_freq/1e6:.3f} MHz  Mode: {mode}{extra}")
-    print("Spectrum (dB):")
-    print(vertical_spectrum(interp, bins))
-    print()
-    print_waterfall()
+    if not args.hide_spectrum:
+        print("Spectrum (dB):")
+        print(vertical_spectrum(interp, bins))
+        print()
+    if not args.hide_waterfall:
+        print_waterfall()
     sys.stdout.flush()
 
 def main():
+    logging.info(f"Starting system!")
+    logging.info(f"Settings: {args}")
+
+    if args.load:
+        load_iq_from_file()
+        return
+
+   
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((args.address, args.port))
+    
+    logging.info(f"Lyssnar på UDP {args.address}:{args.port}")
+    logging.info(f"Expecting format: {args.format}")
+
     print(f"Lyssnar på UDP {args.address}:{args.port}")
     
     print(f"Expecting format: {args.format}")
@@ -512,6 +502,7 @@ def main():
                         iq_data = iq_arr[:,0] + 1j*iq_arr[:,1]
                         meta = stream_metadata.pop(stream_id)
                         stream_buffers.pop(stream_id)
+
                         process_iq(iq_data, meta)
 
             elif args.format == "raw":
@@ -565,7 +556,10 @@ def main():
         print("\nAvslutar mottagare...")
     finally:
         sock.close()
-
+        logging.info(f"Closing system!")
+        if args.store:
+            store_file.close()
+            print(f"IQ-data sparad till {args.store}")
 
 def parse_vita49_packet(data: bytes):
     if len(data) < 32:
@@ -581,5 +575,142 @@ def parse_vita49_packet(data: bytes):
 
     return stream_id, pkt_no, sample_rate, center_freq, payload
 
+
 if __name__ == "__main__":
+    
+    # --- Argument parser ---
+    parser = argparse.ArgumentParser(description="Terminal-based spectrum and waterfall display")
+    parser.add_argument("--thresholds", type=str, help="Thresholds and symbols, e.g., '-50:|,-72:-,-77:.'")
+    parser.add_argument("--waterfall-height", type=int, default=10, help="Maximum number of rows in the waterfall")
+    parser.add_argument("--bins", type=int, default=80, help="Number of frequency points for display (width)")
+    parser.add_argument("--color-waterfall", action="store_true", help="Display waterfall in color instead of symbols")
+    parser.add_argument("--color-spectrum", action="store_true", help="Display spectrum in color")
+    parser.add_argument("--colormap", type=str, default="viridis", help="Colormap for color: viridis, magma, plasma, inferno")
+    parser.add_argument("--spectrum-symbol", type=str, default=".", 
+                        help="Symbol used for colored spectrum, default '.'")
+    parser.add_argument("--spectrum-symbol-color-background", action="store_true", help="Display spectrum symbol background color")
+    parser.add_argument("--freq-min", type=float, default=None, help="Minimum frequency in spectrum to display (Hz)")
+    parser.add_argument("--freq-max", type=float, default=None, help="Maximum frequency in spectrum to display (Hz)")
+
+    parser.add_argument("--store", type=str, nargs="?", const="./output.iq",
+                        help="Spara inkommande IQ-data till fil (default ./output.iq)")
+    parser.add_argument("--load", type=str, nargs="?", const="./output.iq",
+                        help="Läs IQ-data från fil istället för UDP (default ./output.iq)")
+
+
+
+    parser.add_argument(
+        "--auto-zoom",
+        action="store_true",
+        help="Automatically calculate noise floor and zoom to the area where signals exist"
+    )
+    parser.add_argument(
+        "--auto-zoom-threshold",
+        type=float,
+        default=10.0,
+        help="How many dB above noise floor counts as signal (default 10 dB)"
+    )
+
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        help="Enable logging to file"
+    )
+
+
+    parser.add_argument(
+        "--refresh-rate",
+        type=float,
+        default=None,
+        help="Maximum refresh rate in Hz (default None = as fast as possible)."
+    )
+
+    parser.add_argument(
+        "--max-delta-db",
+        type=float,
+        default=None,
+        help="Maximum allowed jump in dB per refresh (None = no limit) (WARNING: this requires more memory!)"
+    )
+
+    parser.add_argument("--address", type=str, default="127.0.0.1",
+                        help="IP address or hostname of the radio device (e.g., 192.168.1.50)")
+    parser.add_argument("--port", type=int, default=5005,
+                        help="TCP/UDP port for connecting to the radio device")
+    parser.add_argument(
+        "--format",
+        type=str,
+        choices=["vita49", "raw", "simulator"],
+        default="vita49",
+        help="Stream format/protocol, e.g., 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)"
+    )
+
+    parser.add_argument(
+        "--custom-colormap",
+        type=str,
+        help="Custom colormap: startcolor,stopcolor,steps. Example: '#0000FF,#FF0000,64'"
+    )
+
+    parser.add_argument("--spectrum-height", type=int, default=10, help="Height in rows of the spectrum display")
+
+    # --- New arguments: either bar or line mode, and line-width (vertical) ---
+    parser.add_argument("--bar", action="store_true",
+                        help="Display spectrum in bar mode (default).")
+    parser.add_argument("--line", action="store_true",
+                        help="Display spectrum in line mode (contour line).")
+    parser.add_argument("--line-width", type=int, default=1,
+                        help="Vertical thickness (number of rows) of the line in line mode. 1 = one row.")
+
+    parser.add_argument(
+    "--hide-spectrum",
+    action="store_true",
+    help="Do not display the spectrum output"
+    )
+
+    parser.add_argument(
+        "--hide-waterfall",
+        action="store_true",
+        help="Do not display the waterfall output"
+    )
+    prev_interp = None   
+
+    args = parser.parse_args()
+    WIDTH = args.bins
+    COLORMAP_RGB = get_colormap_rgb(args.colormap)
+
+    if args.log:
+        logging.basicConfig(
+            filename="radio_log.txt",
+            level=logging.INFO,
+            format="%(asctime)s - %(levelname)s - %(message)s"
+        )
+        logging.info("Logging started")
+
+    if args.freq_min is not None and args.freq_max is not None:
+        if args.freq_min >= args.freq_max:
+            logging.warning(f"WARNING: --freq-min ({args.freq_min}) has to be less then --freq-max ({args.freq_max})")
+            sys.exit(1)
+
+    if args.thresholds:
+        THRESHOLDS = {}
+        try:
+            pairs = args.thresholds.split(",")
+            for p in pairs:
+                key, sym = p.split(":")
+                key = key.replace("\\", "")
+                THRESHOLDS[int(key)] = sym
+        except Exception as e:
+            logging.warning(f"Fel i thresholds-argument, använder default: {e}")
+            THRESHOLDS = DEFAULT_THRESHOLDS
+    else:
+        THRESHOLDS = DEFAULT_THRESHOLDS
+    if args.store:
+        store_file = open(args.store, "ab")
+        # Skriv metadata först som JSON + newline
+
+    waterfall = deque(maxlen=args.waterfall_height)
+
+    # Default: bar-mode 
+    if not args.bar and not args.line:
+        args.bar = True
+
     main()

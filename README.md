@@ -10,14 +10,8 @@ handle many formats and systems
 
 
 
-TODO:
 
-
-# TODO: add logging option
-
-windows pyinstaller
-pyinstaller script...
-
+# TODO:
 unit tests
 format black
 ci-cd

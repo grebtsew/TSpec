@@ -64,8 +64,8 @@ def send_data(iq_data, metadata, ip="127.0.0.1", port=5005):
         sock.sendto(header + chunk, (ip, port))
 
 def main():
-    center_freq = 100e6
-    sample_rate = 1e6
+    center_freq = 0
+    sample_rate = 1000e3
     bandwidth = 200e3
     duration = 0.05
 
@@ -85,8 +85,8 @@ def main():
         print(f"Skickade {total_packets} datapaket med stream_id {stream_id}")
 
         elapsed = time.time() - start_time
-        if elapsed < 1.0:
-            time.sleep(1.0 - elapsed)
+        if elapsed < 0.5:
+            time.sleep(0.5 - elapsed)
 
 if __name__ == "__main__":
     main()

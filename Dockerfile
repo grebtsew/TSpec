@@ -12,4 +12,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Default command
-CMD ["python", "TSpec.py"]
+CMD ["python", "TSpec.py" , "--address", "0.0.0.0"]
