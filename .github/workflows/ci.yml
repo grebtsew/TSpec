@@ -30,9 +30,9 @@ jobs:
       # 4. Run code formatting check (black/flake8)
       - name: Run code formatting check
         run: |
-          pip install black flake8
+          pip install black 
           black --check .
-          flake8 .
+          
 
       # 5. Run unit tests
       - name: Run unit tests

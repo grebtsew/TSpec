@@ -18,6 +18,8 @@ DEFAULT_THRESHOLDS = {-80: " ", -72: "-", -50: "|"}
 
 THRESHOLDS = None
 
+autozoom_count = 0
+
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip("#")
@@ -136,22 +138,23 @@ stream_metadata = {}
 waterfall = None
 
 
+waterfall_counter = 0  # global
+
+
 def add_waterfall(power_db, freqs=None):
-    """
-    power_db: interpolerat till WIDTH
-    freqs: frekvensvärden för dessa bins (valfritt, behövs bara om du vill göra thresholds dynamiska)
-    """
+    global waterfall_counter
+    waterfall_counter += 1
+    if waterfall_counter < args.waterfall_speed:
+        return  # hoppa över den här uppdateringen
+    waterfall_counter = 0  # återställ
+
     row = []
     if args.color_waterfall:
         min_val, max_val = np.min(power_db), np.max(power_db)
         norm = (power_db - min_val) / (max_val - min_val + 1e-12)
-        norm = np.nan_to_num(
-            norm, nan=0.0, posinf=1.0, neginf=0.0
-        )  # convert NaN/inf to valid numbers
+        norm = np.nan_to_num(norm, nan=0.0, posinf=1.0, neginf=0.0)
         norm = np.clip(norm, 0.0, 1.0)
-
         for n in norm:
-
             r, g, bb = COLORMAP_RGB[int(n * (len(COLORMAP_RGB) - 1))]
             row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
     else:
@@ -294,7 +297,11 @@ def load_iq_from_file():
     path = args.load
     print(f"Läser IQ-data från {path} ...")
 
+    start_sample = args.start_sample if args.start_sample else 0
+    duration_sec = args.duration if args.duration is not None else None
+
     with open(path, "rb") as f:
+        total_samples_read = 0
         while True:
             # Läs metadata (en rad JSON)
             meta_line = f.readline()
@@ -313,21 +320,54 @@ def load_iq_from_file():
                 print("DEBUG: num_samples saknas, hoppar över block")
                 continue
 
-            # Läs IQ-data
+            # Hoppa över samples före start-sample
+            if total_samples_read + num_samples <= start_sample:
+                # Skippa hela blocket
+                f.seek(num_samples * 2 * 4, 1)
+                total_samples_read += num_samples
+                continue
+
+            # Om start ligger mitt i blocket, justera
+            block_start_idx = max(0, start_sample - total_samples_read)
+            block_end_idx = num_samples  # standard: hela blocket
+            if duration_sec is not None:
+                # Beräkna max antal samples som får läsas
+                max_samples = int(duration_sec * meta["sample_rate"])
+                if block_start_idx + max_samples < block_end_idx:
+                    block_end_idx = block_start_idx + max_samples
+
+            samples_to_read = block_end_idx - block_start_idx
+            if samples_to_read <= 0:
+                break
+
+            # Läs hela blocket först
             iq_bytes = f.read(num_samples * 2 * 4)
             if len(iq_bytes) < num_samples * 2 * 4:
                 print("DEBUG: EOF innan block var komplett")
                 break
 
             iq_arr = np.frombuffer(iq_bytes, dtype=np.float32).reshape(-1, 2)
-            iq_data = iq_arr[:, 0] + 1j * iq_arr[:, 1]
+            iq_data = (
+                iq_arr[block_start_idx:block_end_idx, 0]
+                + 1j * iq_arr[block_start_idx:block_end_idx, 1]
+            )
 
             process_iq(iq_data, meta)
-            time.sleep(args.refresh_rate)
+            total_samples_read += num_samples
+
+            # Om duration uppnådd, avbryt
+            if (
+                duration_sec is not None
+                and total_samples_read - start_sample >= max_samples
+            ):
+                break
+
+            if args.refresh_rate:
+                time.sleep(args.refresh_rate)
 
 
 def process_iq(iq_data, meta):
-    global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta
+    global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta, autozoom_count
 
     if args.refresh_rate is not None:
         now = time.time()
@@ -354,21 +394,50 @@ def process_iq(iq_data, meta):
         iq_arr[:, 1] = np.imag(iq_data)
         store_file.write(iq_arr.tobytes())
 
-    # FFT och frekvensaxel
-    spectrum = np.fft.fftshift(np.fft.fft(iq_data))
-    freqs = np.fft.fftshift(np.fft.fftfreq(N, 1 / meta["sample_rate"]))
+    if args.decimate > 1:
+        iq_data = iq_data[:: args.decimate]
+        meta["sample_rate"] /= args.decimate
 
-    # Lägg till center frequency från metadata
-    freqs += meta["center_frequency"]
-    power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
-    power_db -= np.max(power_db)
+    # FFT och frekvensaxel
+    N = len(iq_data)
+    fft_size = args.fft_size if args.fft_size else N
+    if args.window == "hann":
+        win = np.hanning(min(N, fft_size))
+    elif args.window == "hamming":
+        win = np.hamming(min(N, fft_size))
+    elif args.window == "blackman":
+        win = np.blackman(min(N, fft_size))
+    else:  # rectangular
+        win = np.ones(min(N, fft_size))
+
+    iq_block = iq_data[:fft_size] * win
+    spectrum = np.fft.fftshift(np.fft.fft(iq_block))
+    freqs = (
+        np.fft.fftshift(np.fft.fftfreq(fft_size, 1 / meta["sample_rate"]))
+        + meta["center_frequency"]
+    )
+
+    power_db = None
+    if args.waterfall_scale == "linear":
+        power_db = np.abs(spectrum)
+    else:  # default log
+        power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
+
+    if not args.no_normalize:
+        power_db -= np.max(power_db)
 
     # Använd manuella flaggor eller default
     f_min = args.freq_min if args.freq_min is not None else freqs[0]
     f_max = args.freq_max if args.freq_max is not None else freqs[-1]
 
     # Handle autozoom
-    if args.auto_zoom:
+    if args.auto_zoom and (
+        args.auto_zoom_iterations == 0 or autozoom_count < args.auto_zoom_iterations
+    ):
+        # --- autozoom-logik som du redan har ---
+
+        # öka räknaren
+        autozoom_count += 1
         # Beräkna brusgolv som t.ex. median + liten marginal
         noise_floor = np.median(power_db)
 
@@ -436,6 +505,19 @@ def process_iq(iq_data, meta):
             interp = clamp_delta(interp, prev_interp, args.max_delta_db)
             prev_interp = interp.copy()
 
+    if args.smoothing > 0:
+        if (
+            not hasattr(process_iq, "smoothed_interp")
+            or process_iq.smoothed_interp.shape != interp.shape
+        ):
+            process_iq.smoothed_interp = interp.copy()
+        else:
+            alpha = float(args.smoothing)
+            process_iq.smoothed_interp = (
+                1.0 - alpha
+            ) * process_iq.smoothed_interp + alpha * interp
+        interp = process_iq.smoothed_interp.copy()
+
     # Säkerställ att peak alltid visas
     peak_bin = np.searchsorted(bins, peak_freq)
     if 0 <= peak_bin < WIDTH:
@@ -444,17 +526,26 @@ def process_iq(iq_data, meta):
     # Resten av displayen som tidigare
     add_waterfall(interp, bins)
 
-    sys.stdout.write("\x1b[2J\x1b[H")
+    if args.clear_on_new_frame:
+        sys.stdout.write("\x1b[2J\x1b[H")
+    else:
+        sys.stdout.write("\x1b[H")
+
     mode = "Line" if args.line else "Bar"
     extra = f"  LineWidth: {args.line_width}" if args.line else ""
+
     print(
         f"Stream {meta.get('stream_id','-')}  CF {meta.get('center_frequency',0)/1e6:.3f} MHz  "
         f"SR {meta.get('sample_rate',0)/1e6:.2f} Msps  Peak: {peak_freq/1e6:.3f} MHz  Mode: {mode}{extra}"
     )
+    if args.timestamp:
+        print(time.strftime("[%Y-%m-%d %H:%M:%S]"), end=" ")
+
     if not args.hide_spectrum:
         print("Spectrum (dB):")
         print(vertical_spectrum(interp, bins))
         print()
+
     if not args.hide_waterfall:
         print_waterfall()
     sys.stdout.flush()
@@ -757,6 +848,99 @@ if __name__ == "__main__":
         action="store_true",
         help="Do not display the waterfall output",
     )
+
+    # --- FFT & signalbehandling ---
+    parser.add_argument(
+        "--fft-size",
+        type=int,
+        default=None,
+        help="FFT size (default = length of input block)",
+    )
+    parser.add_argument(
+        "--window",
+        type=str,
+        default="hann",
+        choices=["hann", "hamming", "blackman", "rectangular"],
+        help="FFT window function",
+    )
+
+    parser.add_argument(
+        "--no-normalize",
+        action="store_true",
+        help="Don't normalize spectrum to 0 dB max",
+    )
+
+    # --- Waterfall ---
+    parser.add_argument(
+        "--waterfall-scale",
+        type=str,
+        default="log",
+        choices=["log", "linear"],
+        help="Scale type for waterfall (log or linear)",
+    )
+
+    # --- Smoothing ---
+    parser.add_argument(
+        "--smoothing",
+        type=float,
+        default=0.0,
+        help="Apply exponential moving average smoothing (0.0 = off, e.g., 0.2 = 20%)",
+    )
+
+    # --- Tidsstämpling ---
+    parser.add_argument(
+        "--timestamp", action="store_true", help="Print timestamp with each frame"
+    )
+
+    # --- Decimation ---
+    parser.add_argument(
+        "--decimate",
+        type=int,
+        default=1,
+        help="Use only every Nth sample to reduce sample rate (default=1 = no decimation)",
+    )
+    parser.add_argument(
+        "--fft-overlap",
+        type=float,
+        default=0.0,
+        help="Fractional overlap between FFT blocks (0.0 = no overlap, 0.5 = 50%)",
+    )
+    # --- Filkontroll ---
+    parser.add_argument(
+        "--start-sample",
+        type=int,
+        default=0,
+        help="Start reading file at this sample index (default=0)",
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="How many seconds of data to process from file (default=None = until EOF)",
+    )
+
+    parser.add_argument(
+        "--waterfall-speed",
+        type=int,
+        default=1,
+        help="Number of waterfall updates to skip per frame (higher = faster scroll)",
+    )
+
+    # --- Autozoom ---
+    parser.add_argument(
+        "--auto-zoom-iterations",
+        type=int,
+        default=0,
+        help="Number of iterations to perform autozooming (0 = infinite)",
+    )
+
+    parser.add_argument(
+        "--clear-on-new-frame",
+        type=bool,
+        default=False,
+        help="Determine if to clear terminal each frame. This might cause flimmer.",
+    )
+
     prev_interp = None
 
     args = parser.parse_args()
