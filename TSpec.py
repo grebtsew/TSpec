@@ -220,20 +220,21 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
 
                     draw_symbol = symbol
                     # Lägg till feature-symbol på toppen av stapeln
-                    if feature_flags is not None and feature_flags[i] and h == b:
-                        draw_symbol = args.feature_symbol
-                        if getattr(args, "feature_color", None):
-                            try:
-                                r_fc, g_fc, b_fc = [
-                                    int(x) for x in args.feature_color.split(",")
-                                ]
-                            except:
-                                r_fc, g_fc, b_fc = 255, 255, 255
-                            # Skriv över alla andra färger
-                            if args.spectrum_symbol_color_background:
-                                draw_symbol = f"\x1b[48;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
-                            else:
-                                draw_symbol = f"\x1b[38;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
+                    if args.feature_symbol is not None:
+                        if feature_flags is not None and feature_flags[i] and h == b:
+                            draw_symbol = args.feature_symbol
+                            if getattr(args, "feature_color", None):
+                                try:
+                                    r_fc, g_fc, b_fc = [
+                                        int(x) for x in args.feature_color.split(",")
+                                    ]
+                                except:
+                                    r_fc, g_fc, b_fc = 255, 255, 255
+                                # Skriv över alla andra färger
+                                if args.spectrum_symbol_color_background:
+                                    draw_symbol = f"\x1b[48;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
+                                else:
+                                    draw_symbol = f"\x1b[38;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
 
                     if args.color_spectrum:
                         if args.spectrum_symbol_color_background:
@@ -262,24 +263,21 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                             draw_symbol = f"\x1b[38;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{draw_symbol}\x1b[0m"
 
                 # Lägg till feature-symbol på toppen av stapeln
-                if feature_flags is not None and feature_flags[i] and h == b:
-                    draw_symbol = args.feature_symbol
-                    if getattr(args, "feature_color", None):
-                        try:
-                            r_fc, g_fc, b_fc = [
-                                int(x) for x in args.feature_color.split(",")
-                            ]
-                        except:
-                            r_fc, g_fc, b_fc = 255, 255, 255
-                        # Skriv över alla andra färger
-                        if args.spectrum_symbol_color_background:
-                            draw_symbol = (
-                                f"\x1b[48;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
-                            )
-                        else:
-                            draw_symbol = (
-                                f"\x1b[38;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
-                            )
+                if args.feature_symbol is not None:
+                    if feature_flags is not None and feature_flags[i] and h == b:
+                        draw_symbol = args.feature_symbol
+                        if getattr(args, "feature_color", None):
+                            try:
+                                r_fc, g_fc, b_fc = [
+                                    int(x) for x in args.feature_color.split(",")
+                                ]
+                            except:
+                                r_fc, g_fc, b_fc = 255, 255, 255
+                            # Skriv över alla andra färger
+                            if args.spectrum_symbol_color_background:
+                                draw_symbol = f"\x1b[48;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
+                            else:
+                                draw_symbol = f"\x1b[38;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
 
                 row.append(
                     draw_symbol
@@ -1155,7 +1153,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--feature-symbol",
         type=str,
-        default="*",
+        default=None,
         help="Symbol used to mark extracted features (e.g., peak) in the spectrum",
     )
 
