@@ -131,7 +131,6 @@ The table below describes all available command-line flags and their correspondi
 | `--maxhold` | Show maximum value per bin across frames instead of current spectrum | False |
 | `--rssi` | Display RSSI (Received Signal Strength Indicator) of the shown spectrum instead of per-bin values | False |
 | `--ignore-missing-meta` | Ignore IQ blocks that are missing metadata instead of raising errors | False |
-
 | `--feature-symbol` | Symbol used to mark extracted features (e.g., peak) in the spectrum. | * |
 | `--feature-color` | Color for extracted feature (format: 'R,G,B' 0-255), overrides symbol color if set. | None |
 | `--feature-avg-offset` | Offset for feature extraction detection, threshold avg + this offset. | 5 |
@@ -140,7 +139,7 @@ The table below describes all available command-line flags and their correspondi
 
 
 
-## Features
+# Features
 
 - Terminal-based **spectrum and waterfall display** with ASCII symbols or colored visualization.
 - Support for colormaps: `viridis`, `magma`, `plasma`, `inferno`, or custom colormaps.
@@ -150,7 +149,7 @@ The table below describes all available command-line flags and their correspondi
 - Adjustable display settings including spectrum height, waterfall height, symbol choice, and line/bar modes.
 - Supports maximum refresh rates and clamping of rapid dB changes for smoother visualizations.
 
-## Input
+# Input
 
 The input folder contains the following input-examples:
 - rtl-sdr example using minimized vita49
@@ -179,7 +178,7 @@ The project uses MIT License, read more [here](./License).
 The project uses MIT License, read more [here](./License).
 
 
-## Disclaimer
+# Disclaimer
 
 Large quantities of this code and documentation is generated using ChatGPT-5 mini 2025.
 

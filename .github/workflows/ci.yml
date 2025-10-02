@@ -42,4 +42,4 @@ jobs:
       # 6. Build Docker image
       - name: Build Docker image
         run: |
-          docker build -t TSpec:test .
+          docker build -t tspec:test .
