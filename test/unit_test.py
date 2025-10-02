@@ -48,15 +48,30 @@ def setup_fake_args():
         no_normalize=False,
         waterfall_scale="log",
         timestamp=False,
+        db_min=120,
+        db_max=0,
+        agc=None,
+        avg_blocks=10,
+        maxhold=None,
+        byteorder="little",
+        feature_avg_offset=10,
+        clear_on_new_frame=False,
+        rssi=True,
+        waterfall_speed=1,
+        dtype="float32",
+        ignore_missing_meta=True,
     )
 
     if not hasattr(app, "waterfall") or app.waterfall is None:
-        from collections import deque
-
         app.waterfall = deque(maxlen=app.args.waterfall_height)
 
     if not hasattr(app, "THRESHOLDS") or app.THRESHOLDS is None:
         app.THRESHOLDS = app.DEFAULT_THRESHOLDS.copy()
+
+    # Reset global state för isolerade tester
+    app.prev_interp = None
+    app.maxhold_spectrum = None
+    app.autozoom_count = 0
 
 
 # --- Grundläggande tester ---

@@ -15,7 +15,7 @@ args = None
 
 # --- Defaultvalues ---
 DEFAULT_THRESHOLDS = {-80: " ", -72: "-", -50: "|"}
-
+maxhold_spectrum = None
 THRESHOLDS = None
 
 autozoom_count = 0
@@ -154,6 +154,11 @@ def add_waterfall(power_db, freqs=None):
         norm = (power_db - min_val) / (max_val - min_val + 1e-12)
         norm = np.nan_to_num(norm, nan=0.0, posinf=1.0, neginf=0.0)
         norm = np.clip(norm, 0.0, 1.0)
+
+        # Apply gamma correction
+        gamma = args.waterfall_gamma if args.waterfall_gamma is not None else 1.0
+        norm = norm**gamma
+
         for n in norm:
             r, g, bb = COLORMAP_RGB[int(n * (len(COLORMAP_RGB) - 1))]
             row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
@@ -168,7 +173,7 @@ def add_waterfall(power_db, freqs=None):
     waterfall.append("".join(row))
 
 
-def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
+def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
 
     if f_min is None:
@@ -176,8 +181,8 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
     if f_max is None:
         f_max = freqs[-1]
 
-    min_db = np.min(power_db)
-    max_db = np.max(power_db)
+    min_db = args.db_min if args.db_min is not None else np.min(power_db)
+    max_db = args.db_max if args.db_max is not None else np.max(power_db)
     denom = max_db - min_db + 1e-12
     levels = np.clip((power_db - min_db) / denom, 0, 1)
     bars = (levels * (HEIGHT - 1)).astype(int)
@@ -199,51 +204,89 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
                 b_left = bars[i - 1] if i > 0 else b
                 b_right = bars[i + 1] if i < len(bars) - 1 else b
 
-                # Kontroll: linjen + fyllning mellan bin
                 if dist <= half or (b_left <= h <= b) or (b_right <= h <= b):
                     base_idx = int(levels[i] * (len(COLORMAP_RGB) - 1))
                     r, g, bb = COLORMAP_RGB[base_idx]
 
-                    # Fade beräknas utifrån vertikalt avstånd till linjens topp
-                    vertical_dist = max(0, b - h)  # avstånd neråt
+                    vertical_dist = max(0, b - h)
                     fade = 1.0
                     if half > 0:
                         fade = 1.0 - 0.1 * min(dist, vertical_dist) / (half + 1e-12)
-                        fade = max(0.1, fade)  # säkerställ minst lite ljus
+                        fade = max(0.1, fade)
 
                     r_f = int(r * 255 * fade + 255 * (1 - fade))
                     g_f = int(g * 255 * fade + 255 * (1 - fade))
                     b_f = int(bb * 255 * fade + 255 * (1 - fade))
 
+                    draw_symbol = symbol
+                    # Lägg till feature-symbol på toppen av stapeln
+                    if feature_flags is not None and feature_flags[i] and h == b:
+                        draw_symbol = args.feature_symbol
+                        if getattr(args, "feature_color", None):
+                            try:
+                                r_fc, g_fc, b_fc = [
+                                    int(x) for x in args.feature_color.split(",")
+                                ]
+                            except:
+                                r_fc, g_fc, b_fc = 255, 255, 255
+                            # Skriv över alla andra färger
+                            if args.spectrum_symbol_color_background:
+                                draw_symbol = f"\x1b[48;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
+                            else:
+                                draw_symbol = f"\x1b[38;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
+
                     if args.color_spectrum:
                         if args.spectrum_symbol_color_background:
-                            row.append(f"\x1b[48;2;{r_f};{g_f};{b_f}m{symbol}\x1b[0m")
+                            row.append(
+                                f"\x1b[48;2;{r_f};{g_f};{b_f}m{draw_symbol}\x1b[0m"
+                            )
                         else:
-                            row.append(f"\x1b[38;2;{r_f};{g_f};{b_f}m{symbol}\x1b[0m")
+                            row.append(
+                                f"\x1b[38;2;{r_f};{g_f};{b_f}m{draw_symbol}\x1b[0m"
+                            )
                     else:
-                        row.append(symbol)
+                        row.append(draw_symbol)
                 else:
                     row.append(" ")
 
         else:
-            # vanliga staplar
             for i, b in enumerate(bars):
+                draw_symbol = symbol
                 if b >= h:
                     if args.color_spectrum:
                         idx = b * len(COLORMAP_RGB) // HEIGHT
                         r, g, bb = COLORMAP_RGB[idx]
                         if args.spectrum_symbol_color_background:
-                            row.append(
-                                f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{symbol}\x1b[0m"
+                            draw_symbol = f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{draw_symbol}\x1b[0m"
+                        else:
+                            draw_symbol = f"\x1b[38;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{draw_symbol}\x1b[0m"
+
+                # Lägg till feature-symbol på toppen av stapeln
+                if feature_flags is not None and feature_flags[i] and h == b:
+                    draw_symbol = args.feature_symbol
+                    if getattr(args, "feature_color", None):
+                        try:
+                            r_fc, g_fc, b_fc = [
+                                int(x) for x in args.feature_color.split(",")
+                            ]
+                        except:
+                            r_fc, g_fc, b_fc = 255, 255, 255
+                        # Skriv över alla andra färger
+                        if args.spectrum_symbol_color_background:
+                            draw_symbol = (
+                                f"\x1b[48;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
                             )
                         else:
-                            row.append(
-                                f"\x1b[38;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{symbol}\x1b[0m"
+                            draw_symbol = (
+                                f"\x1b[38;2;{r_fc};{g_fc};{b_fc}m{draw_symbol}\x1b[0m"
                             )
-                    else:
-                        row.append(symbol)
-                else:
-                    row.append(" ")
+
+                row.append(
+                    draw_symbol
+                    if b >= h
+                    or (feature_flags is not None and feature_flags[i] and h == b)
+                    else " "
+                )
 
         rows.append("".join(row))
 
@@ -255,7 +298,6 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
         f_min + i * (f_max - f_min) / (num_ticks - 1) for i in range(num_ticks)
     ]
 
-    # Välj enhet dynamiskt
     span = f_max - f_min
     span = max(span, f_max, f_min)
     if span >= 1e6:
@@ -270,7 +312,6 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None):
 
     for f in tick_freqs:
         f_scaled = f / scale
-        # Avrunda för läsbarhet
         if unit == "Hz":
             f_rounded = int(round(f_scaled))
         else:
@@ -317,8 +358,11 @@ def load_iq_from_file():
 
             num_samples = meta.get("num_samples")
             if num_samples is None:
-                print("DEBUG: num_samples saknas, hoppar över block")
-                continue
+                if args.ignore_missing_meta:
+                    continue  # hoppa över blocket tyst
+                else:
+                    print("DEBUG: num_samples saknas, hoppar över block")
+                    continue
 
             # Hoppa över samples före start-sample
             if total_samples_read + num_samples <= start_sample:
@@ -346,7 +390,26 @@ def load_iq_from_file():
                 print("DEBUG: EOF innan block var komplett")
                 break
 
-            iq_arr = np.frombuffer(iq_bytes, dtype=np.float32).reshape(-1, 2)
+            dtype_map = {
+                "float32": np.dtype("float32"),
+                "int16": np.dtype("int16"),
+                "int8": np.dtype("int8"),
+            }
+            dtype = dtype_map[args.dtype]
+
+            # Apply byte order
+            if args.byteorder == "big":
+                dtype = dtype.newbyteorder(">")
+            else:
+                dtype = dtype.newbyteorder("<")
+
+            iq_arr = np.frombuffer(iq_bytes, dtype=dtype).reshape(-1, 2)
+
+            # Om input är int8/int16, normalisera till -1.0..1.0
+            if dtype in [np.int16, np.int8]:
+                max_val = float(np.iinfo(dtype).max)
+                iq_arr = iq_arr.astype(np.float32) / max_val
+
             iq_data = (
                 iq_arr[block_start_idx:block_end_idx, 0]
                 + 1j * iq_arr[block_start_idx:block_end_idx, 1]
@@ -373,187 +436,261 @@ def process_iq(iq_data, meta):
         now = time.time()
         min_interval = 1.0 / args.refresh_rate
         if now - last_update < min_interval:
-            return  # hoppa över uppdatering
+            return
         last_update = now
 
     N = len(iq_data)
     if N < 2:
         return
 
-    # Spara om --store är aktiverat
-    if args.store:
+    # Bestäm FFT- och blockstorlek samt overlap (säkra värden)
+    fft_size = int(args.fft_size) if args.fft_size else N
+    block_size = int(args.block_size) if getattr(args, "block_size", None) else fft_size
+    overlap = (
+        float(args.fft_overlap)
+        if getattr(args, "fft_overlap", 0.0) is not None
+        else 0.0
+    )
+    overlap = min(max(overlap, 0.0), 0.99)  # clamp 0..0.99
+    hop_size = max(1, int(block_size * (1.0 - overlap)))
 
+    # Spara om --store är aktiverat (oförändrat)
+    if args.store:
         meta_copy = meta.copy()
         meta_copy["num_samples"] = len(iq_data)
-
         meta_json = json.dumps(meta_copy)
         store_file.write(meta_json.encode("utf-8") + b"\n")
-        # Skriv block direkt till fil
         iq_arr = np.zeros((len(iq_data), 2), dtype=np.float32)
         iq_arr[:, 0] = np.real(iq_data)
         iq_arr[:, 1] = np.imag(iq_data)
         store_file.write(iq_arr.tobytes())
 
+    # Decimera om begärt
     if args.decimate > 1:
         iq_data = iq_data[:: args.decimate]
         meta["sample_rate"] /= args.decimate
 
-    # FFT och frekvensaxel
-    N = len(iq_data)
-    fft_size = args.fft_size if args.fft_size else N
-    if args.window == "hann":
-        win = np.hanning(min(N, fft_size))
-    elif args.window == "hamming":
-        win = np.hamming(min(N, fft_size))
-    elif args.window == "blackman":
-        win = np.blackman(min(N, fft_size))
-    else:  # rectangular
-        win = np.ones(min(N, fft_size))
+    # Om input är kortare än block_size: padda med nollor så vi kör åtminstone en FFT
+    if len(iq_data) < block_size:
+        pad_len = block_size - len(iq_data)
+        iq_data = np.pad(iq_data, (0, pad_len), "constant")
 
-    iq_block = iq_data[:fft_size] * win
-    spectrum = np.fft.fftshift(np.fft.fft(iq_block))
-    freqs = (
-        np.fft.fftshift(np.fft.fftfreq(fft_size, 1 / meta["sample_rate"]))
-        + meta["center_frequency"]
-    )
+    # Loop över block med overlap
+    for start in range(0, len(iq_data) - block_size + 1, hop_size):
+        segment = iq_data[start : start + block_size]
 
-    power_db = None
-    if args.waterfall_scale == "linear":
-        power_db = np.abs(spectrum)
-    else:  # default log
-        power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
-
-    if not args.no_normalize:
-        power_db -= np.max(power_db)
-
-    # Använd manuella flaggor eller default
-    f_min = args.freq_min if args.freq_min is not None else freqs[0]
-    f_max = args.freq_max if args.freq_max is not None else freqs[-1]
-
-    # Handle autozoom
-    if args.auto_zoom and (
-        args.auto_zoom_iterations == 0 or autozoom_count < args.auto_zoom_iterations
-    ):
-        # --- autozoom-logik som du redan har ---
-
-        # öka räknaren
-        autozoom_count += 1
-        # Beräkna brusgolv som t.ex. median + liten marginal
-        noise_floor = np.median(power_db)
-
-        # Mask för bin där signalen ligger över brus + tröskel
-        signal_mask = power_db > (noise_floor + args.auto_zoom_threshold)
-
-        if np.any(signal_mask):
-            # Få fram första och sista frekvens med signal
-            sig_freqs = freqs[signal_mask]
-            auto_min = sig_freqs.min()
-            auto_max = sig_freqs.max()
-
-            # Lägg gärna på lite “marginal” i båda ändar, t.ex. 5 %
-            span = auto_max - auto_min
-            auto_min -= 0.05 * span
-            auto_max += 0.05 * span
-
-            f_min, f_max = auto_min, auto_max
+        # Fönsterfunktion (behåller din logik)
+        win_len = min(len(segment), fft_size)
+        if args.window == "hann":
+            win = np.hanning(win_len)
+        elif args.window == "hamming":
+            win = np.hamming(win_len)
+        elif args.window == "blackman":
+            win = np.blackman(win_len)
         else:
-            # Om ingen signal hittas: visa fullbredd
-            f_min, f_max = freqs[0], freqs[-1]
+            win = np.ones(win_len)
 
-        if THRESHOLDS == DEFAULT_THRESHOLDS:
-            symbols = list(DEFAULT_THRESHOLDS.values())
-            n = len(symbols)
+        # Förbered block för FFT (trim/padda till fft_size om nödvändigt)
+        block_for_fft = segment[:fft_size].copy()
+        if len(block_for_fft) < win_len:
+            # om fft_size < win_len (ovanligt) - trim; annars pad
+            block_for_fft = np.pad(
+                block_for_fft, (0, win_len - len(block_for_fft)), "constant"
+            )
+        block_for_fft[:win_len] *= win
 
-            signal_mask = (freqs >= f_min) & (freqs <= f_max)
-            power_interval = power_db[signal_mask]
+        # FFT + frekvensaxel
+        spectrum = np.fft.fftshift(np.fft.fft(block_for_fft, n=fft_size))
+        freq_offset = getattr(args, "freq_offset", 0.0)
+        freqs = (
+            np.fft.fftshift(np.fft.fftfreq(fft_size, 1 / meta["sample_rate"]))
+            + meta.get("center_frequency", 0.0)
+            + freq_offset
+        )
 
-            if len(power_interval) > 0:
-                min_val = np.min(power_interval)
-                max_val = np.max(power_interval)
-
-                # Dela intervallet i n steg
-                step = (max_val - min_val) / n
-                new_thresholds = {}
-                for i, sym in enumerate(symbols):
-                    thresh = min_val + i * step
-                    new_thresholds[int(round(thresh))] = sym
-
-                THRESHOLDS = new_thresholds
-
-    # Beräkna peak på hela spektrumet
-    peak_idx = np.argmax(power_db)
-    peak_freq = freqs[peak_idx]
-
-    mask = (freqs >= f_min) & (freqs <= f_max)
-    freqs_zoom = freqs[mask]
-    power_zoom = power_db[mask]
-
-    # Om mask blev tom (t.ex. felaktiga freq-min/max) -> fallback
-    if freqs_zoom.size == 0:
-        freqs_zoom = freqs
-        power_zoom = power_db
-
-    # Interpolera till terminalbredd
-    bins = np.linspace(freqs_zoom[0], freqs_zoom[-1], WIDTH)
-    interp = np.interp(bins, freqs_zoom, power_zoom)
-
-    # Spara och utför clamp
-    if args.max_delta_db is not None:
-        if prev_interp is None:
-            prev_interp = interp.copy()
+        # Power (lin/log) + normalisering
+        if args.waterfall_scale == "linear":
+            power_db = np.abs(spectrum)
         else:
-            interp = clamp_delta(interp, prev_interp, args.max_delta_db)
-            prev_interp = interp.copy()
+            power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
 
-    if args.smoothing > 0:
-        if (
-            not hasattr(process_iq, "smoothed_interp")
-            or process_iq.smoothed_interp.shape != interp.shape
+        if not args.no_normalize:
+            power_db = power_db - np.max(power_db)
+
+        if args.db_min is not None:
+            power_db = np.maximum(power_db, args.db_min)  # allt under db-min klipps
+        if args.db_max is not None:
+            power_db = np.minimum(power_db, args.db_max)  # allt över db-max klipps
+
+        if args.agc:
+            if not hasattr(process_iq, "agc_level"):
+                process_iq.agc_level = np.max(power_db)
+
+            # Exponential smoothing of gain level
+            alpha = args.agc_speed
+            process_iq.agc_level = (1 - alpha) * process_iq.agc_level + alpha * np.max(
+                power_db
+            )
+
+            # Normalize power_db relative to AGC level
+            power_db -= process_iq.agc_level
+
+        # 4️⃣ Clip to db-min / db-max
+        if args.db_min is not None:
+            power_db = np.maximum(power_db, args.db_min)
+        if args.db_max is not None:
+            power_db = np.minimum(power_db, args.db_max)
+        # f_min / f_max (behöver freqs här, därför inuti loopen)
+        f_min = args.freq_min if args.freq_min is not None else freqs[0]
+        f_max = args.freq_max if args.freq_max is not None else freqs[-1]
+
+        # Autozoom (behållen logik, räknas per analyserat block)
+        if args.auto_zoom and (
+            args.auto_zoom_iterations == 0 or autozoom_count < args.auto_zoom_iterations
         ):
-            process_iq.smoothed_interp = interp.copy()
+            autozoom_count += 1
+            noise_floor = np.median(power_db)
+            signal_mask = power_db > (noise_floor + args.auto_zoom_threshold)
+            if np.any(signal_mask):
+                sig_freqs = freqs[signal_mask]
+                auto_min = sig_freqs.min()
+                auto_max = sig_freqs.max()
+                span = auto_max - auto_min
+                f_min = auto_min - 0.05 * span
+                f_max = auto_max + 0.05 * span
+            else:
+                f_min, f_max = freqs[0], freqs[-1]
+
+            if THRESHOLDS == DEFAULT_THRESHOLDS:
+                symbols = list(DEFAULT_THRESHOLDS.values())
+                n = len(symbols)
+                signal_mask = (freqs >= f_min) & (freqs <= f_max)
+                power_interval = power_db[signal_mask]
+                if len(power_interval) > 0:
+                    min_val = np.min(power_interval)
+                    max_val = np.max(power_interval)
+                    step = (max_val - min_val) / n
+                    new_thresholds = {}
+                    for i, sym in enumerate(symbols):
+                        thresh = min_val + i * step
+                        new_thresholds[int(round(thresh))] = sym
+                    THRESHOLDS = new_thresholds
+
+        # Peak och zoomad vy
+        peak_idx = np.argmax(power_db)
+        peak_freq = freqs[peak_idx]
+        mask = (freqs >= f_min) & (freqs <= f_max)
+        freqs_zoom = freqs[mask]
+        power_zoom = power_db[mask]
+        if freqs_zoom.size == 0:
+            freqs_zoom = freqs
+            power_zoom = power_db
+
+        # Interpolera till terminalbredd
+        bins = np.linspace(freqs_zoom[0], freqs_zoom[-1], WIDTH)
+        # np.interp klarar även singel-element men vi skyddar oss ändå
+        if freqs_zoom.size == 1:
+            interp = np.full(WIDTH, power_zoom[0])
         else:
-            alpha = float(args.smoothing)
-            process_iq.smoothed_interp = (
-                1.0 - alpha
-            ) * process_iq.smoothed_interp + alpha * interp
-        interp = process_iq.smoothed_interp.copy()
+            interp = np.interp(bins, freqs_zoom, power_zoom)
 
-    # Säkerställ att peak alltid visas
-    peak_bin = np.searchsorted(bins, peak_freq)
-    if 0 <= peak_bin < WIDTH:
-        interp[peak_bin] = max(interp[peak_bin], power_db[peak_idx])
+        # --- Avg-blocks ---
+        if args.avg_blocks > 1:
+            if not hasattr(process_iq, "block_history"):
+                from collections import deque
 
-    # Resten av displayen som tidigare
-    add_waterfall(interp, bins)
+                process_iq.block_history = deque(maxlen=args.avg_blocks)
+            process_iq.block_history.append(interp.copy())
+            interp = np.mean(np.array(process_iq.block_history), axis=0)
 
-    if args.clear_on_new_frame:
-        sys.stdout.write("\x1b[2J\x1b[H")
-    else:
-        sys.stdout.write("\x1b[H")
+        # Clamp / max-delta
+        if args.max_delta_db is not None:
+            if prev_interp is None:
+                prev_interp = interp.copy()
+            else:
+                interp = clamp_delta(interp, prev_interp, args.max_delta_db)
+                prev_interp = interp.copy()
 
-    mode = "Line" if args.line else "Bar"
-    extra = f"  LineWidth: {args.line_width}" if args.line else ""
+        # Smoothing (EMA) — bevarad
+        if args.smoothing > 0:
+            if (
+                not hasattr(process_iq, "smoothed_interp")
+                or process_iq.smoothed_interp.shape != interp.shape
+            ):
+                process_iq.smoothed_interp = interp.copy()
+            else:
+                alpha = float(args.smoothing)
+                process_iq.smoothed_interp = (
+                    1.0 - alpha
+                ) * process_iq.smoothed_interp + alpha * interp
+            interp = process_iq.smoothed_interp.copy()
 
-    print(
-        f"Stream {meta.get('stream_id','-')}  CF {meta.get('center_frequency',0)/1e6:.3f} MHz  "
-        f"SR {meta.get('sample_rate',0)/1e6:.2f} Msps  Peak: {peak_freq/1e6:.3f} MHz  Mode: {mode}{extra}"
-    )
-    if args.timestamp:
-        print(time.strftime("[%Y-%m-%d %H:%M:%S]"), end=" ")
+        if args.maxhold:
+            global maxhold_spectrum
+            if maxhold_spectrum is None or maxhold_spectrum.shape != interp.shape:
+                maxhold_spectrum = interp.copy()
+            else:
+                maxhold_spectrum = np.maximum(maxhold_spectrum, interp)
+            interp = maxhold_spectrum
 
-    if not args.hide_spectrum:
-        print("Spectrum (dB):")
-        print(vertical_spectrum(interp, bins))
-        print()
+        # Visa peak i interpolationen
+        peak_bin = np.searchsorted(bins, peak_freq)
+        if 0 <= peak_bin < WIDTH:
+            interp[peak_bin] = max(interp[peak_bin], power_db[peak_idx])
 
-    if not args.hide_waterfall:
-        print_waterfall()
-    sys.stdout.flush()
+        feature_flags = np.zeros_like(interp, dtype=bool)
+
+        # Medelvärde + tröskel
+        mean_val = np.mean(interp)
+        threshold = mean_val + args.feature_avg_offset
+
+        # Markera bins som peakar över tröskeln
+        for i in range(1, len(interp) - 1):
+            if (
+                interp[i] > interp[i - 1]
+                and interp[i] > interp[i + 1]
+                and interp[i] > threshold
+            ):
+                feature_flags[i] = True
+
+        # Waterfall + utskrift (oförändrat)
+        add_waterfall(interp, bins)
+        if args.clear_on_new_frame:
+            sys.stdout.write("\x1b[2J\x1b[H")
+        else:
+            sys.stdout.write("\x1b[H")
+
+        mode = "Line" if args.line else "Bar"
+        extra = f"  LineWidth: {args.line_width}" if args.line else ""
+
+        print(
+            f"Stream {meta.get('stream_id','-')}  CF {meta.get('center_frequency',0)/1e6:.3f} MHz  "
+            f"SR {meta.get('sample_rate',0)/1e6:.2f} Msps  Peak: {peak_freq/1e6:.3f} MHz  Mode: {mode}{extra}"
+        )
+        if args.timestamp:
+            print(time.strftime("[%Y-%m-%d %H:%M:%S]"), end=" ")
+
+        if args.rssi:
+            # Konvertera från dB till linjär skala för medelvärde
+            linear_power = 10 ** (interp / 10.0)
+            rssi_val = 10 * np.log10(np.mean(linear_power) + 1e-12)
+            print(f"RSSI: {rssi_val:.2f} dB ")
+        if not args.hide_spectrum:
+            print("Spectrum (dB):")
+            print(vertical_spectrum(interp, bins, feature_flags=feature_flags))
+            print()
+
+        if not args.hide_waterfall:
+            print_waterfall()
+        sys.stdout.flush()
 
 
 def main():
     logging.info(f"Starting system!")
     logging.info(f"Settings: {args}")
+
+    sys.stdout.write("\x1b[2J\x1b[H")
+    sys.stdout.flush()
 
     if args.load:
         load_iq_from_file()
@@ -591,7 +728,11 @@ def main():
                     pkt_no = int.from_bytes(data[16:20], "big")
                     payload = data[20:]
                     if stream_id not in stream_buffers:
-                        continue
+                        if args.ignore_missing_meta:
+                            continue
+                        else:
+                            print(f"DEBUG: saknas metadata för stream {stream_id}")
+                            continue
                     stream_buffers[stream_id][pkt_no] = payload
                     expected = stream_metadata[stream_id]["packet_count"]
                     if len(stream_buffers[stream_id]) == expected:
@@ -689,6 +830,11 @@ if __name__ == "__main__":
     # --- Argument parser ---
     parser = argparse.ArgumentParser(
         description="Terminal-based spectrum and waterfall display"
+    )
+    parser.add_argument(
+        "--rssi",
+        action="store_true",
+        help="Display received signal strength (RSSI) in dB instead of full spectrum",
     )
     parser.add_argument(
         "--thresholds",
@@ -798,7 +944,7 @@ if __name__ == "__main__":
         "--port",
         type=int,
         default=5005,
-        help="TCP/UDP port for connecting to the radio device",
+        help="UDP port for connecting to the radio device",
     )
     parser.add_argument(
         "--format",
@@ -850,18 +996,20 @@ if __name__ == "__main__":
     )
 
     # --- FFT & signalbehandling ---
-    parser.add_argument(
-        "--fft-size",
-        type=int,
-        default=None,
-        help="FFT size (default = length of input block)",
-    )
+
     parser.add_argument(
         "--window",
         type=str,
         default="hann",
         choices=["hann", "hamming", "blackman", "rectangular"],
         help="FFT window function",
+    )
+
+    parser.add_argument(
+        "--freq-offset",
+        type=int,
+        default=0,
+        help="Frequency Offset",
     )
 
     parser.add_argument(
@@ -892,6 +1040,19 @@ if __name__ == "__main__":
         "--timestamp", action="store_true", help="Print timestamp with each frame"
     )
 
+    parser.add_argument(
+        "--agc",
+        action="store_true",
+        help="Enable automatic gain control to normalize spectrum display",
+    )
+
+    parser.add_argument(
+        "--agc-speed",
+        type=float,
+        default=0.1,
+        help="AGC speed / smoothing factor (0.0 = slow, 1.0 = instant). Default 0.1",
+    )
+
     # --- Decimation ---
     parser.add_argument(
         "--decimate",
@@ -899,6 +1060,20 @@ if __name__ == "__main__":
         default=1,
         help="Use only every Nth sample to reduce sample rate (default=1 = no decimation)",
     )
+
+    parser.add_argument(
+        "--ignore-missing-meta",
+        action="store_true",
+        help="Ignore IQ blocks that are missing metadata instead of raising errors",
+    )
+
+    parser.add_argument(
+        "--fft-size",
+        type=int,
+        default=None,
+        help="FFT size (default = length of input block)",
+    )
+
     parser.add_argument(
         "--fft-overlap",
         type=float,
@@ -939,6 +1114,76 @@ if __name__ == "__main__":
         type=bool,
         default=False,
         help="Determine if to clear terminal each frame. This might cause flimmer.",
+    )
+
+    parser.add_argument(
+        "--waterfall-gamma",
+        type=float,
+        default=1.0,
+        help="Gamma correction for waterfall colors (default=1.0, linear)",
+    )
+
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["float32", "int16", "int8"],
+        default="float32",
+        help="Data type of incoming IQ samples (float32, int16, int8). Default = float32",
+    )
+
+    parser.add_argument(
+        "--byteorder",
+        type=str,
+        choices=["little", "big"],
+        default="little",
+        help="Byte order of incoming IQ samples (little or big endian). Default = little",
+    )
+
+    parser.add_argument(
+        "--avg-blocks",
+        type=int,
+        default=1,
+        help="Average over N blocks (smoother display, default=1 = off)",
+    )
+
+    parser.add_argument(
+        "--maxhold",
+        action="store_true",
+        help="Show maximum value per bin across frames instead of current spectrum",
+    )
+
+    parser.add_argument(
+        "--feature-symbol",
+        type=str,
+        default="*",
+        help="Symbol used to mark extracted features (e.g., peak) in the spectrum",
+    )
+
+    parser.add_argument(
+        "--feature-color",
+        type=str,
+        default=None,
+        help="Color for extracted feature (format: 'R,G,B' 0-255), overrides symbol color if set",
+    )
+
+    parser.add_argument(
+        "--feature-avg-offset",
+        type=int,
+        default=5,
+        help="Offset for feature extraction detection.",
+    )
+
+    parser.add_argument(
+        "--block-size",
+        type=int,
+        default=None,
+        help="Block size (number of samples per FFT). Default = use fft-size or input length",
+    )
+    parser.add_argument(
+        "--db-min", type=float, default=None, help="Minimum dB level for display"
+    )
+    parser.add_argument(
+        "--db-max", type=float, default=None, help="Maximum dB level for display"
     )
 
     prev_interp = None

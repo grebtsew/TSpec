@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+First notable version, ready for deployment and evaluation.
 
 ## [1.0.0] - 2025-10-01
 ### Added
@@ -10,10 +10,3 @@ All notable changes to this project will be documented in this file.
 - Bar and line mode spectrum
 - Optional saving/loading of IQ data
 
-### Changed
-- Optimized rendering for old terminals
-- Improved colormap interpolation
-
-### Fixed
-- Frequency labeling issues in spectrum display
-- Crashes when processing empty IQ blocks

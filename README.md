@@ -1,19 +1,73 @@
 # TSpec
+TSpec is a minimalist, high-performance terminal-based spectrum and waterfall display designed to run on any system, even without a GUI. It works seamlessly on older terminals and low-powered hardware, making it ideal for embedded systems or remote servers. With support for multiple stream formats and radio systems, TSpec ensures maximum flexibility while keeping resource usage minimal. TSpec also provides a wide range of features—see [features](#flags) for more details. Whether you need a quick visualization on a headless server or a lightweight monitoring tool, TSpec delivers fast, reliable, and portable spectrum analysis wherever you need it.
 
 
-![CI](https://github.com/<USERNAME>/<REPO>/actions/workflows/python-tests.yml/badge.svg)
 
 ![demogif](./docs/demo.gif)
 
-TSpec is a minimalist, high-performance terminal-based spectrum and waterfall display designed to run on any system, even without a GUI. It works seamlessly on older terminals and low-powered hardware, making it ideal for embedded systems or remote servers. With support for multiple stream formats and radio systems, TSpec ensures maximum flexibility while keeping resource usage minimal. Whether you need a quick visualization on a headless server or a lightweight monitoring tool, TSpec delivers fast, reliable, and portable spectrum analysis wherever you need it.
+![CI](https://github.com/grebtsew/TSpec/actions/workflows/ci.yml/badge.svg)
+![license](https://img.shields.io/github/license/grebtsew/TSpec)
+![size](https://img.shields.io/github/repo-size/grebtsew/TSpec)
+![commit](https://img.shields.io/github/last-commit/grebtsew/TSpec)
 
 
-## Installation
+
+# Run (for simple usage)
+
+Download executable [here](https://github.com/grebtsew/TSpec/release) from latest release and get going. I recommend placing the application in system programs a using enviroment variables.
+
+Windows:
+```bash
+TSpec.exe [OPTIONS]
+```
+
+Linux:
+```bash
+TSpec [OPTIONS]
+```
+
+# Examples 
+These examples uses windows executable:
+
+Minimal features:
+```bash
+TSpec.exe 
+```
+Setting symbols and sizes, using format raw
+```bash
+TSpec.exe --thresholds '\-45:|,\-50:-,\-65:.' --waterfall-height 20 --bins 80 --spectrum-height 10 --format raw --freq-min 0 --freq-max 500000  --db-min -120 --db-max 0
+```
+
+Using default color themes, calculate rssi and timestamp:
+```bash
+TSpec.exe --color-waterfall --color-spectrum --colormap inferno --spectrum-symbol " " --spectrum-symbol-color-background --rssi --timestamp
+```
+
+Using custom color themes and line graph with set refresh rate:
+```bash
+TSpec.exe --color-waterfall --color-waterfall --color-spectrum --colormap inferno --spectrum-symbol " " --spectrum-symbol-color-background --format raw  --line-width 3 --line --format raw   --colormap custom --custom-colormap "#000000,#aa0000,64" --refresh-rate 10
+```
+
+
+## Run (for developers, python and docker users)
+Run in python use:
+```bash
+python TSpec.py [OPTIONS]
+```
+Or in windows use the release .exe file, a corresponding file in release for linux users exist.
+
+Run in docker using:
+```bash
+docker-compose up
+```
+
+
+## Installation (for developers or python users )
 
 1. Clone the repository:
 ```bash
-git clone <repository_url>
-cd <repository_folder>
+git clone https://github.com/grebtsew/TSpec
+cd ./TSpec
 ```
 2. Install required:
 ```bash
@@ -25,21 +79,9 @@ pip install -r ./requirements.txt
 chmod +x TSpec.py
 ```
 
-## Run
-Run in python use:
-```bash
-python TSpec.py [OPTIONS]
-```
-Or in windows use the release .exe file, corresponding for linux users.
+# Features
 
-Run in docker using:
-```bash
-docker-compose up
-```
-
-## Flags
-
-The table below describe all available flags.
+The table below describes all available command-line flags and their corresponding features.
 
 
 | Argument                             | Description                                                         | Default / Notes |
@@ -78,7 +120,22 @@ The table below describe all available flags.
 | `--no-normalize`                     | Don't normalize spectrum to 0 dB max                                | -               |
 | `--waterfall-scale`                  | Scale type for waterfall (`log` or `linear`)                        | `log`           |
 | `--waterfall-speed`                  | Number of waterfall updates to skip per frame                       |                 |
-| `--clear-on-new-frame`                | Determine if to clear terminal each frame. This might cause flimmer                       |                 |
+| `--clear-on-new-frame`               | Determine if to clear terminal each frame. This might cause flimmer |                 |
+| `--freq-offset`                      | Frequency Offset                                                    |  0               |
+| `--block-size`                       | Block size (number of samples per FFT). Default = use fft-size or input length    | 0                |
+| `--db-min`                           | Minimum dB level for display (clip). If not set, auto or normalize is used       | None             |
+| `--db-max`                           | Maximum dB level for display (clip). If not set, auto or normalize is used       | None             |
+| `--waterfall-gamma`                   | Gamma correction for waterfall colors (default 1.0 = linear)                     | 1.0              |
+| `--dtype`                             | Data type of incoming IQ samples (float32, int16, int8). Default = float32       | float32          |
+| `--avg-blocks` | Average over N blocks for smoother display (1 = off) | 1 |
+| `--maxhold` | Show maximum value per bin across frames instead of current spectrum | False |
+| `--rssi` | Display RSSI (Received Signal Strength Indicator) of the shown spectrum instead of per-bin values | False |
+| `--ignore-missing-meta` | Ignore IQ blocks that are missing metadata instead of raising errors | False |
+
+| `--feature-symbol` | Symbol used to mark extracted features (e.g., peak) in the spectrum. | * |
+| `--feature-color` | Color for extracted feature (format: 'R,G,B' 0-255), overrides symbol color if set. | None |
+| `--feature-avg-offset` | Offset for feature extraction detection, threshold avg + this offset. | 5 |
+
 
 
 
@@ -93,23 +150,33 @@ The table below describe all available flags.
 - Adjustable display settings including spectrum height, waterfall height, symbol choice, and line/bar modes.
 - Supports maximum refresh rates and clamping of rapid dB changes for smoother visualizations.
 
-## Examples
+## Input
 
-The example folder contain these examples:
+The input folder contains the following input-examples:
 - rtl-sdr example using minimized vita49
 - microphone data as raw
 - simulator data as raw
 - simulator data as simulator (own) format
 
-## Tests
+# Dependencies
 
--- todo
+The only required dependency except for python3 is numpy for performing the FFT and handling data arrays more effectively. For testing and examples, some more libraries are needed!
+
+# Testing
+Vital and core functionality are tested with pytest. To run tests yourself enter `Testing`-folder and run:
+```cmd
+pytest .
+```
+
+# Format
+This repository uses python `black` to keep code format.
+
+# License
+The project uses MIT License, read more [here](./License).
 
 
-## License
-
-
-## Changelog
+# License
+The project uses MIT License, read more [here](./License).
 
 
 ## Disclaimer
@@ -119,18 +186,3 @@ Large quantities of this code and documentation is generated using ChatGPT-5 m
 
 
 @Grebtsew 2025
-
-
-
-
-# TODO
-badges
-create demo gif
-update readme
-
-
-install
-
-changelog
-create release
-to english

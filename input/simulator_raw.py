@@ -25,6 +25,8 @@ parser.add_argument(
 parser.add_argument(
     "--send-rate", type=float, default=0.01, help="Tid mellan paket [s]"
 )
+parser.add_argument("--metadata", type=int, default=1, help="Send metadata")
+
 args = parser.parse_args()
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -80,7 +82,9 @@ def main():
         f"Skickar simulering till {args.host}:{args.port} "
         f"SR={args.samplerate} Hz, block={args.blocksize}"
     )
-    stream_id = send_metadata()
+
+    if args.metadata == 1:
+        stream_id = send_metadata()
 
     try:
         while True:
