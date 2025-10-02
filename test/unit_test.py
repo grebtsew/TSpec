@@ -60,6 +60,7 @@ def setup_fake_args():
         waterfall_speed=1,
         dtype="float32",
         ignore_missing_meta=True,
+        feature_symbol=None,
     )
 
     if not hasattr(app, "waterfall") or app.waterfall is None:
