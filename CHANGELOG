@@ -1,8 +1,26 @@
 # Changelog
 
-First notable version, ready for deployment and evaluation.
+## [1.1.0] - 2025-10-04
+
+Second version, with added quality of life features.
+TODO:
+
+### Added
+- Added live spectrum movement interactions arrows, f, r, +, -.
+- Added Deb package building for future apt-get package
+- Added modular parse/protocols and example, can now add your own parser of data
+- Added documentation about creation of parsing-modules
+- Added attack/decay of spectrum values
+- Added symbol animation on decay
+
+### Changed
+- Set min-max db per default
+- Updated link to release in readme file
 
 ## [1.0.0] - 2025-10-01
+
+First notable version, ready for deployment and evaluation.
+
 ### Added
 - Terminal-based spectrum and waterfall display
 - Support for VITA-49, raw IQ, and simulated streams
