@@ -298,7 +298,10 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
 
     span = f_max - f_min
     span = max(span, f_max, f_min)
-    if span >= 1e6:
+    if span >= 1e9:  # > 1 GHz
+        scale = 1e9
+        unit = "GHz"
+    elif span >= 1e6:
         unit = "MHz"
         scale = 1e6
     elif span >= 1e3:
@@ -308,9 +311,17 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         unit = "Hz"
         scale = 1.0
 
+    # Kontrollera om tick-värdena blir > 999 (max 3 siffror)
+    max_val = max(abs(f_min), abs(f_max)) / scale
+    if max_val > 999:
+        factor = 10 ** (int(np.log10(max_val)) - 2)  # t.ex. 10^3 -> 10^(3-2)=10
+        scale *= factor
+        unit = f"{unit}*{factor:.0e}"  # t.ex. "MHz*1e3"
+
+    # Tick-loop fungerar precis som tidigare
     for f in tick_freqs:
         f_scaled = f / scale
-        if unit == "Hz":
+        if unit.startswith("Hz") and "*" not in unit:
             f_rounded = int(round(f_scaled))
         else:
             f_rounded = round(f_scaled, 2)
@@ -320,7 +331,6 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         start = max(0, min(6 + pos - len(label) // 2, len(label_line) - len(label)))
         for j, ch in enumerate(label):
             label_line[start + j] = ch
-
     rows.append(tick_line)
     rows.append("".join(label_line) + f" {unit}")
     return "\n".join(rows)
@@ -430,6 +440,7 @@ def load_iq_from_file():
 def process_iq(iq_data, meta):
     global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta, autozoom_count
 
+
     if args.refresh_rate is not None:
         now = time.time()
         min_interval = 1.0 / args.refresh_rate
@@ -506,6 +517,8 @@ def process_iq(iq_data, meta):
             + freq_offset
         )
 
+        handle_key_press(freqs)
+
         # Power (lin/log) + normalisering
         if args.waterfall_scale == "linear":
             power_db = np.abs(spectrum)
@@ -554,10 +567,10 @@ def process_iq(iq_data, meta):
                 auto_min = sig_freqs.min()
                 auto_max = sig_freqs.max()
                 span = auto_max - auto_min
-                f_min = auto_min - 0.05 * span
-                f_max = auto_max + 0.05 * span
+                args.freq_min = auto_min - 0.05 * span
+                args.freq_max = auto_max + 0.05 * span
             else:
-                f_min, f_max = freqs[0], freqs[-1]
+                args.freq_min, args.freq_max = freqs[0], freqs[-1]
 
             if THRESHOLDS == DEFAULT_THRESHOLDS:
                 symbols = list(DEFAULT_THRESHOLDS.values())
@@ -584,13 +597,22 @@ def process_iq(iq_data, meta):
             freqs_zoom = freqs
             power_zoom = power_db
 
-        # Interpolera till terminalbredd
-        bins = np.linspace(freqs_zoom[0], freqs_zoom[-1], WIDTH)
-        # np.interp klarar även singel-element men vi skyddar oss ändå
-        if freqs_zoom.size == 1:
-            interp = np.full(WIDTH, power_zoom[0])
-        else:
-            interp = np.interp(bins, freqs_zoom, power_zoom)
+        if args.freq_min is None:
+            args.freq_min = freqs[0]
+        if args.freq_max is None:
+            args.freq_max = freqs[-1]
+
+       # Skapa bins för display baserat på det nuvarande fönstret
+        bins = np.linspace(args.freq_min, args.freq_max, WIDTH)
+
+        # Interpolera spektrum till bins, fyll utanför med lågt värde (db_min)
+        interp = np.interp(
+            bins,
+            freqs,
+            power_db,
+            left=args.db_min if args.db_min is not None else -100,
+            right=args.db_min if args.db_min is not None else -100,
+        )
 
         # --- Avg-blocks ---
         if args.avg_blocks > 1:
@@ -631,10 +653,14 @@ def process_iq(iq_data, meta):
                 maxhold_spectrum = np.maximum(maxhold_spectrum, interp)
             interp = maxhold_spectrum
 
-        # Visa peak i interpolationen
-        peak_bin = np.searchsorted(bins, peak_freq)
+        # Visa peak i interpolationen# Hitta peak inom det zoomade fönstret
+        peak_idx = np.argmax(power_zoom)
+        peak_freq = freqs_zoom[peak_idx]
+        peak_bin = int((peak_freq - args.freq_min) / (args.freq_max - args.freq_min) * (WIDTH - 1))
+
         if 0 <= peak_bin < WIDTH:
-            interp[peak_bin] = max(interp[peak_bin], power_db[peak_idx])
+            interp[peak_bin] = max(interp[peak_bin], power_zoom[peak_idx])
+
 
         feature_flags = np.zeros_like(interp, dtype=bool)
 
@@ -806,6 +832,80 @@ def main():
         if args.store:
             store_file.close()
             print(f"IQ-data sparad till {args.store}")
+
+import sys, os, select
+
+def get_key():
+    """Returnerar en tangent om en är nedtryckt, annars None (ingen blockering)."""
+    if os.name == 'nt':
+        import msvcrt
+        key = None
+        while msvcrt.kbhit():
+            key = msvcrt.getch().decode('utf-8', errors='ignore')
+        return key
+    else:  # Linux / macOS
+        import tty, termios
+        key = None
+        dr, _, _ = select.select([sys.stdin], [], [], 0)
+        while dr:
+            old_settings = termios.tcgetattr(sys.stdin)
+            try:
+                tty.setcbreak(sys.stdin.fileno())
+                key = sys.stdin.read(1)
+            finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            dr, _, _ = select.select([sys.stdin], [], [], 0)
+        return key
+
+def handle_key_press(freqs):
+    global maxhold_spectrum, prev_interp, autozoom_count
+    key = get_key()
+    if key:
+        # Initiera frekvensfönster om None
+        if args.freq_min is None or args.freq_max is None:
+            args.freq_min = freqs[0]
+            args.freq_max = freqs[-1]
+        print(key)
+        span = args.freq_max - args.freq_min
+        mid = (args.freq_max + args.freq_min) / 2
+
+        if key == 'a':   # vänster
+            shift = span * 0.1
+            args.freq_min -= shift
+            args.freq_max -= shift
+        elif key == 'd':  # höger
+            shift = span * 0.1
+            args.freq_min += shift
+            args.freq_max += shift
+        elif key == 'w':  # höj dB-max
+            args.db_max = (args.db_max or 0) + 5
+        elif key == 's':  # sänk dB-min
+            args.db_min = (args.db_min or -100) - 5
+        elif key == '+':  # zooma in
+            span *= 0.9
+            args.freq_min = mid - span/2
+            args.freq_max = mid + span/2
+        elif key == '-':  # zooma ut
+            span *= 1.1
+            args.freq_min = mid - span/2
+            args.freq_max = mid + span/2
+        elif key == 'f':  # autozoom en gång
+            args.auto_zoom = True
+            args.auto_zoom_iterations += 1
+        elif key == 'r':  # reset
+            args.freq_min = None
+            args.freq_max = None
+            args.db_min = -80
+            args.db_max = 0
+            maxhold_spectrum = None
+            prev_interp = None
+        elif key in '0123456789':
+            if key == '0':
+                args.refresh_rate = None
+                print("\nRefresh rate: unlimited")
+            else:
+                args.refresh_rate = int(key)
+                print(f"\nRefresh rate: {args.refresh_rate} fps")
 
 
 def parse_vita49_packet(data: bytes):
@@ -1178,10 +1278,10 @@ if __name__ == "__main__":
         help="Block size (number of samples per FFT). Default = use fft-size or input length",
     )
     parser.add_argument(
-        "--db-min", type=float, default=None, help="Minimum dB level for display"
+        "--db-min", type=float, default=-80, help="Minimum dB level for display"
     )
     parser.add_argument(
-        "--db-max", type=float, default=None, help="Maximum dB level for display"
+        "--db-max", type=float, default=0, help="Maximum dB level for display"
     )
 
     prev_interp = None
