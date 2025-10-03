@@ -6,7 +6,7 @@ Second version, with added quality of life features.
 TODO:
 
 ### Added
-- Added live spectrum movement interactions arrows, f, r, +, -.
+- Added live spectrum movement interactions arrows, f, r, +, -, refresh rate, c.
 - Added Deb package building for future apt-get package
 - Added modular parse/protocols and example, can now add your own parser of data
 - Added documentation about creation of parsing-modules

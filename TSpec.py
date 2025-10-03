@@ -6,6 +6,7 @@ from collections import deque
 import struct
 import time
 import logging
+import random
 
 last_update = 0.0
 
@@ -142,7 +143,7 @@ waterfall_counter = 0  # global
 
 
 def add_waterfall(power_db, freqs=None):
-    global waterfall_counter
+    global waterfall_counter, COLORMAP_RGB
     waterfall_counter += 1
     if waterfall_counter < args.waterfall_speed:
         return  # hoppa över den här uppdateringen
@@ -174,6 +175,7 @@ def add_waterfall(power_db, freqs=None):
 
 
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
+    global COLORMAP_RGB
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
 
     if f_min is None:
@@ -858,9 +860,14 @@ def get_key():
         return key
 
 def handle_key_press(freqs):
-    global maxhold_spectrum, prev_interp, autozoom_count
+    global maxhold_spectrum, prev_interp, autozoom_count, COLORMAP_RGB
     key = get_key()
+
     if key:
+        # clear old
+        sys.stdout.write("\x1b[2J\x1b[H")
+
+        
         # Initiera frekvensfönster om None
         if args.freq_min is None or args.freq_max is None:
             args.freq_min = freqs[0]
@@ -892,6 +899,13 @@ def handle_key_press(freqs):
         elif key == 'f':  # autozoom en gång
             args.auto_zoom = True
             args.auto_zoom_iterations += 1
+        elif key == 'c':  # random_color
+            if args.color_spectrum or args.color_waterfall:
+                args.colormap = "custom"
+                args.custom_colormap = f"{random_hex_color()},{random_hex_color()},64"
+                
+                COLORMAP_RGB = get_colormap_rgb(args.colormap)
+                
         elif key == 'r':  # reset
             args.freq_min = None
             args.freq_max = None
@@ -899,6 +913,8 @@ def handle_key_press(freqs):
             args.db_max = 0
             maxhold_spectrum = None
             prev_interp = None
+
+
         elif key in '0123456789':
             if key == '0':
                 args.refresh_rate = None
@@ -907,6 +923,8 @@ def handle_key_press(freqs):
                 args.refresh_rate = int(key)
                 print(f"\nRefresh rate: {args.refresh_rate} fps")
 
+def random_hex_color():
+    return "#{:06X}".format(random.randint(0, 0xFFFFFF))
 
 def parse_vita49_packet(data: bytes):
     if len(data) < 32:
@@ -922,8 +940,9 @@ def parse_vita49_packet(data: bytes):
 
     return stream_id, pkt_no, sample_rate, center_freq, payload
 
-
+COLORMAP_RGB = None
 if __name__ == "__main__":
+     
 
     # --- Argument parser ---
     parser = argparse.ArgumentParser(
