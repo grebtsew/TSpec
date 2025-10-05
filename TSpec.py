@@ -174,6 +174,8 @@ def add_waterfall(power_db, freqs=None):
     waterfall.append("".join(row))
 
 
+
+
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
     global COLORMAP_RGB
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
@@ -589,6 +591,8 @@ def process_iq(iq_data, meta):
                         new_thresholds[int(round(thresh))] = sym
                     THRESHOLDS = new_thresholds
 
+
+
         # Peak och zoomad vy
         peak_idx = np.argmax(power_db)
         peak_freq = freqs[peak_idx]
@@ -624,6 +628,28 @@ def process_iq(iq_data, meta):
                 process_iq.block_history = deque(maxlen=args.avg_blocks)
             process_iq.block_history.append(interp.copy())
             interp = np.mean(np.array(process_iq.block_history), axis=0)
+
+        # --- Efter avg_blocks-logiken ---
+        if not hasattr(process_iq, "interp_prev"):
+            process_iq.interp_prev = interp.copy()
+
+        # delta fallprocent per tick
+        slew = args.peak_preserve  # t.ex. 0.1 = 10% per tick
+
+        # skillnad mellan föregående och nuvarande
+        diff = interp - process_iq.interp_prev
+
+        # om signalen går upp → visa direkt
+        output_interp = np.where(diff > 0, interp, process_iq.interp_prev)
+
+        # om signalen går ner → minska med procent
+        falling = diff < 0
+        output_interp[falling] = process_iq.interp_prev[falling] + diff[falling] * slew
+
+        # spara som tidigare
+        process_iq.interp_prev = output_interp.copy()
+        interp = output_interp
+
 
         # Clamp / max-delta
         if args.max_delta_db is not None:
@@ -662,6 +688,7 @@ def process_iq(iq_data, meta):
 
         if 0 <= peak_bin < WIDTH:
             interp[peak_bin] = max(interp[peak_bin], power_zoom[peak_idx])
+
 
 
         feature_flags = np.zeros_like(interp, dtype=bool)
@@ -704,7 +731,7 @@ def process_iq(iq_data, meta):
         if not args.hide_spectrum:
             print("Spectrum (dB):")
             print(vertical_spectrum(interp, bins, feature_flags=feature_flags))
-            print()
+            
 
         if not args.hide_waterfall:
             print_waterfall()
@@ -1155,6 +1182,15 @@ if __name__ == "__main__":
         help="Apply exponential moving average smoothing (0.0 = off, e.g., 0.2 = 20%)",
     )
 
+    parser.add_argument(
+    "--peak-preserve",
+    type=float,
+        default=0.1,
+    help="Behåll toppar (max) när signalen ökar, slewdown value float."   
+    )
+
+    
+
     # --- Tidsstämpling ---
     parser.add_argument(
         "--timestamp", action="store_true", help="Print timestamp with each frame"
@@ -1278,6 +1314,11 @@ if __name__ == "__main__":
         default=None,
         help="Symbol used to mark extracted features (e.g., peak) in the spectrum",
     )
+
+    parser.add_argument("--animate-symbols", action="store_true",
+                        help="Aktivera symbolanimation (övergång mellan symboler)")
+    parser.add_argument("--animate-length", type=int, default=5,
+                        help="Antal steg för symbolövergång innan slutlig symbol")
 
     parser.add_argument(
         "--feature-color",

@@ -7,14 +7,17 @@ TODO:
 
 ### Added
 - Added live spectrum movement interactions arrows, f, r, +, -, refresh rate, c, x.
+- Added attack/decay of spectrum values
+
+
+- Added symbol animation on decay
+
 - Added Deb package building for future apt-get package
 - Added modular parse/protocols and example, can now add your own parser of data
 - Added documentation about creation of parsing-modules
-- Added attack/decay of spectrum values
-- Added symbol animation on decay
 - Added example sweeping rtl-sdr 
 - Added soupy-sdr controls
-- Added iqfile mode
+- Added iqfile mode and example
 
 ### Changed
 - Set min-max db per default
