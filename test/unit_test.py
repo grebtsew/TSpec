@@ -9,7 +9,7 @@ import json
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import pytest
-import TSpec as app  # anta att din kod ligger i app.py
+import src.TSpec as app  # anta att din kod ligger i app.py
 
 
 # --- Setup fake args för tester ---

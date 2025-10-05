@@ -191,6 +191,8 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     levels = np.clip((power_db - min_db) / denom, 0, 1)
     bars = (levels * (HEIGHT - 1)).astype(int)
 
+
+
     rows = []
     symbol = args.spectrum_symbol
     step_db = (max_db - min_db) / (HEIGHT - 1)
@@ -339,12 +341,10 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     rows.append("".join(label_line) + f" {unit}")
     return "\n".join(rows)
 
-
 def print_waterfall():
     print(f"Waterfall (Symbols {THRESHOLDS}, max height {args.waterfall_height}):")
     for row in reversed(waterfall):
         print("      " + row)
-
 
 def load_iq_from_file():
     path = args.load

@@ -1,0 +1,13 @@
+Source: TSpec
+Section: utils
+Priority: optional
+Maintainer: Grebtsew
+Build-Depends: debhelper (>= 12), dh-python, python3-all, python3-setuptools
+Standards-Version: 4.5.0
+Homepage: https://github.com/grebtsew/TSpec
+
+Package: tspec
+Architecture: all
+Depends: ${python3:Depends}, ${misc:Depends}
+Description: Kort beskrivning av programmet
+ Längre beskrivning som kan gå över flera rader.
