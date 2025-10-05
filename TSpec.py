@@ -864,9 +864,7 @@ def handle_key_press(freqs):
     key = get_key()
 
     if key:
-        # clear old
-        sys.stdout.write("\x1b[2J\x1b[H")
-
+        
         
         # Initiera frekvensfönster om None
         if args.freq_min is None or args.freq_max is None:
@@ -899,13 +897,18 @@ def handle_key_press(freqs):
         elif key == 'f':  # autozoom en gång
             args.auto_zoom = True
             args.auto_zoom_iterations += 1
-        elif key == 'c':  # random_color
+
+        elif key =='x':  # random_color
             if args.color_spectrum or args.color_waterfall:
                 args.colormap = "custom"
                 args.custom_colormap = f"{random_hex_color()},{random_hex_color()},64"
                 
                 COLORMAP_RGB = get_colormap_rgb(args.colormap)
-                
+            
+        elif key == 'c': # clear
+            # clear old
+            sys.stdout.write("\x1b[2J\x1b[H")
+
         elif key == 'r':  # reset
             args.freq_min = None
             args.freq_max = None
