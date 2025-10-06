@@ -8,6 +8,13 @@ import time
 import logging
 import random
 
+import importlib.util
+
+protocol_handler = None
+
+protocol_module = None
+parse_module = None
+
 last_update = 0.0
 
 stored_iq = []
@@ -762,8 +769,15 @@ def main():
         sock.settimeout(3.0)
         while True:
             try:
-                data, _ = sock.recvfrom(BUFFER_SIZE)
+                if protocol_handler:
+                    # Custom protocol provides its own data-fetching logic
+                    data = protocol_handler.get_iq_data()
+                else:
+                    data, _ = sock.recvfrom(BUFFER_SIZE)
             except socket.timeout:
+                continue
+            except Exception as e:
+                print(f"Protocol error: {e}")
                 continue
 
             if args.format == "simulator":
@@ -853,6 +867,26 @@ def main():
                 }
 
                 process_iq(iq_data, meta)
+
+            elif args.format == "parse_module":
+                if not parse_module:
+                    print("⚠️ No parse module loaded. Use --parse-module ./path/to/parser.py")
+                    continue
+
+                try:
+                    result = parse_module.parse_data(data)
+                    if not result:
+                        continue
+
+                    iq_data, meta = result
+                    if iq_data is None:
+                        continue
+
+                    process_iq(iq_data, meta or {})
+                except Exception as e:
+                    print(f"Parse module error: {e}")
+                    continue
+
     except KeyboardInterrupt:
         print("\nAvslutar mottagare...")
     finally:
@@ -1230,6 +1264,11 @@ if __name__ == "__main__":
         help="FFT size (default = length of input block)",
     )
 
+    parser.add_argument("--input", type=str, default="udp",
+                    help="Input source: 'udp', 'iqfile', 'soupySDR' or path to a Python protocol module.")
+    parser.add_argument("--file", type=str, help="Path to IQ file if using 'iqfile'.")
+    
+
     parser.add_argument(
         "--fft-overlap",
         type=float,
@@ -1320,6 +1359,9 @@ if __name__ == "__main__":
     parser.add_argument("--animate-length", type=int, default=5,
                         help="Antal steg för symbolövergång innan slutlig symbol")
 
+    parser.add_argument("--protocol-module", type=str,
+                    help="Path to a Python module implementing a custom radio protocol handler.")
+
     parser.add_argument(
         "--feature-color",
         type=str,
@@ -1340,6 +1382,10 @@ if __name__ == "__main__":
         default=None,
         help="Block size (number of samples per FFT). Default = use fft-size or input length",
     )
+    
+    parser.add_argument("--parse-module", type=str,
+                    help="Path to a custom Python parser module implementing parse_data(data) -> (iq_data, meta)")
+    
     parser.add_argument(
         "--db-min", type=float, default=-80, help="Minimum dB level for display"
     )
@@ -1352,6 +1398,33 @@ if __name__ == "__main__":
     args = parser.parse_args()
     WIDTH = args.bins
     COLORMAP_RGB = get_colormap_rgb(args.colormap)
+
+    if args.parse_module:
+        module_path = os.path.abspath(args.parse_module)
+        module_name = os.path.splitext(os.path.basename(module_path))[0]
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        if hasattr(module, "parse_data"):
+            parse_module = module
+            print(f"✅ Loaded parse module: {module_name}")
+        else:
+            print(f"⚠️ Parse module {module_name} missing required function parse_data(data)")
+
+    if args.protocol_module:
+        module_path = os.path.abspath(args.protocol_module)
+        module_name = os.path.splitext(os.path.basename(module_path))[0]
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        
+        if hasattr(module, "get_iq_data"):
+            protocol_handler = module
+            print(f"✅ Loaded protocol module: {module_name}")
+        else:
+            print(f"⚠️ Module {module_name} does not define get_iq_data() — skipping.")
+    
 
     if args.log:
         logging.basicConfig(
