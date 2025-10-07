@@ -6,6 +6,7 @@ Template for a custom SDR data parser module.
 
 import numpy as np
 
+
 def parse_data(data):
     """
     Required:

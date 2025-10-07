@@ -12,13 +12,13 @@ from rtlsdr import RtlSdr
 UDP_IP = "127.0.0.1"
 UDP_PORT = 5005
 
-FREQ_START = 30e6      # Hz
-FREQ_STOP = 1700e6     # Hz
-STEP = 2e6             # Hz per steg (≈ instantan bandbredd)
-DWELL = 0.05           # sekunder per frekvens (kan ökas till 0.1 för stabilare resultat)
+FREQ_START = 30e6  # Hz
+FREQ_STOP = 1700e6  # Hz
+STEP = 2e6  # Hz per steg (≈ instantan bandbredd)
+DWELL = 0.05  # sekunder per frekvens (kan ökas till 0.1 för stabilare resultat)
 
 BUF_SAMPLES = 2048
-SAMPLE_RATE = 2.4e6    # Hz
+SAMPLE_RATE = 2.4e6  # Hz
 GAIN = "auto"
 STREAM_ID = uuid.uuid4().bytes[:16]  # 16-byte unik ID
 
@@ -26,6 +26,7 @@ STREAM_ID = uuid.uuid4().bytes[:16]  # 16-byte unik ID
 # UDP socket
 # -----------------------------
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
 
 # -----------------------------
 # VITA-49 IF Header
@@ -59,7 +60,9 @@ freqs = np.arange(FREQ_START, FREQ_STOP, STEP)
 pkt_count = 0
 
 print(f"\nRTL-SDR Sweep → VITA-49 UDP {UDP_IP}:{UDP_PORT}")
-print(f"Frekvensområde: {FREQ_START/1e6:.1f}–{FREQ_STOP/1e6:.1f} MHz ({len(freqs)} steg)")
+print(
+    f"Frekvensområde: {FREQ_START/1e6:.1f}–{FREQ_STOP/1e6:.1f} MHz ({len(freqs)} steg)"
+)
 print(f"Sveptid per steg: {DWELL:.3f} s\n")
 
 try:

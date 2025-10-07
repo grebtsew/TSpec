@@ -12,8 +12,9 @@ import importlib.util
 
 protocol_handler = None
 
-protocol_module = None
 parse_module = None
+
+
 
 last_update = 0.0
 
@@ -27,6 +28,69 @@ maxhold_spectrum = None
 THRESHOLDS = None
 
 autozoom_count = 0
+
+soupy_available = False
+try:
+    import SoapySDR
+    from SoapySDR import *  # noqa
+    soupy_available = True
+except ImportError:
+    print("⚠️ SoapySDR not installed. SoupySDR input disabled.")
+
+sock = None
+iqfile = None
+sdr = None
+
+def setup_input():
+    global sock, protocol_handler, iqfile, sdr
+    
+    if args.input.endswith(".py"):
+        
+        module_path = os.path.abspath(args.input)
+        module_name = os.path.splitext(os.path.basename(module_path))[0]
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        print(f"Loaded module {args.input}")
+
+        if hasattr(module, "get_data"):
+            protocol_handler = module
+            if hasattr(module, "setup"):
+                module.setup()
+            print(f"✅ Loaded protocol module: {module_name}")
+        else:
+            raise AttributeError(f"⚠️ {module_name} does not define get_data()")
+
+    # --- 2️⃣ UDP-ingång ---
+    elif args.input.lower() == "udp":
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((args.address, args.port))
+        sock.settimeout(3.0)
+        print(f"✅ Listening on UDP {args.address}:{args.port}")
+
+    # --- 3️⃣ IQ-fil ---
+    elif args.input.lower() == "iqfile":
+        if not args.filepath:
+            raise ValueError("❌ Missing --filepath argument for iqfile input")
+        iqfile = open(args.filepath, "rb")
+        print(f"✅ Reading IQ data from file: {args.filepath}")
+
+    # --- 4️⃣ SoapySDR (placeholder) ---
+    elif args.input.lower() == "soapysdr":
+        try:
+            if not soupy_available:
+                print("❌ SoapySDR input requested but SoapySDR is not installed.")
+                sys.exit(1)
+            args.driver = getattr(args, "driver", f"driver={args.driver}")
+            sdr = SoapySDR.Device(args.driver)
+            sdr.setSampleRate(SOAPY_SDR_RX, 0, args.sample_rate)
+            sdr.setFrequency(SOAPY_SDR_RX, 0, args.center_frequency)
+            rxStream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
+            sdr.activateStream(rxStream)
+            print("✅ SoapySDR device active")
+        except ImportError:
+            raise ImportError("❌ SoapySDR not installed, run: pip install SoapySDR")
 
 
 def hex_to_rgb(hex_color):
@@ -181,8 +245,6 @@ def add_waterfall(power_db, freqs=None):
     waterfall.append("".join(row))
 
 
-
-
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
     global COLORMAP_RGB
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
@@ -197,8 +259,6 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     denom = max_db - min_db + 1e-12
     levels = np.clip((power_db - min_db) / denom, 0, 1)
     bars = (levels * (HEIGHT - 1)).astype(int)
-
-
 
     rows = []
     symbol = args.spectrum_symbol
@@ -320,10 +380,16 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     elif span >= 1e3:
         unit = "kHz"
         scale = 1e3
-    else:
+    elif span >= 10:
         unit = "Hz"
         scale = 1.0
-
+    elif span >= 1e-3:
+        scale = 1e-3
+        unit = "mHz"
+    else:
+        scale = 1e-6
+        unit = "µHz"
+        
     # Kontrollera om tick-värdena blir > 999 (max 3 siffror)
     max_val = max(abs(f_min), abs(f_max)) / scale
     if max_val > 999:
@@ -348,10 +414,12 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     rows.append("".join(label_line) + f" {unit}")
     return "\n".join(rows)
 
+
 def print_waterfall():
     print(f"Waterfall (Symbols {THRESHOLDS}, max height {args.waterfall_height}):")
     for row in reversed(waterfall):
         print("      " + row)
+
 
 def load_iq_from_file():
     path = args.load
@@ -451,7 +519,6 @@ def load_iq_from_file():
 def process_iq(iq_data, meta):
     global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta, autozoom_count
 
-
     if args.refresh_rate is not None:
         now = time.time()
         min_interval = 1.0 / args.refresh_rate
@@ -539,8 +606,6 @@ def process_iq(iq_data, meta):
         if not args.no_normalize:
             power_db = power_db - np.max(power_db)
 
-
-
         if args.db_min is not None:
             power_db = np.maximum(power_db, args.db_min)  # allt under db-min klipps
         if args.db_max is not None:
@@ -600,8 +665,6 @@ def process_iq(iq_data, meta):
                         new_thresholds[int(round(thresh))] = sym
                     THRESHOLDS = new_thresholds
 
-
-
         # Peak och zoomad vy
         peak_idx = np.argmax(power_db)
         peak_freq = freqs[peak_idx]
@@ -617,7 +680,7 @@ def process_iq(iq_data, meta):
         if args.freq_max is None:
             args.freq_max = freqs[-1]
 
-       # Skapa bins för display baserat på det nuvarande fönstret
+        # Skapa bins för display baserat på det nuvarande fönstret
         bins = np.linspace(args.freq_min, args.freq_max, WIDTH)
 
         # Interpolera spektrum till bins, fyll utanför med lågt värde (db_min)
@@ -659,7 +722,6 @@ def process_iq(iq_data, meta):
         process_iq.interp_prev = output_interp.copy()
         interp = output_interp
 
-
         # Clamp / max-delta
         if args.max_delta_db is not None:
             if prev_interp is None:
@@ -693,12 +755,12 @@ def process_iq(iq_data, meta):
         # Visa peak i interpolationen# Hitta peak inom det zoomade fönstret
         peak_idx = np.argmax(power_zoom)
         peak_freq = freqs_zoom[peak_idx]
-        peak_bin = int((peak_freq - args.freq_min) / (args.freq_max - args.freq_min) * (WIDTH - 1))
+        peak_bin = int(
+            (peak_freq - args.freq_min) / (args.freq_max - args.freq_min) * (WIDTH - 1)
+        )
 
         if 0 <= peak_bin < WIDTH:
             interp[peak_bin] = max(interp[peak_bin], power_zoom[peak_idx])
-
-
 
         feature_flags = np.zeros_like(interp, dtype=bool)
 
@@ -740,7 +802,6 @@ def process_iq(iq_data, meta):
         if not args.hide_spectrum:
             print("Spectrum (dB):")
             print(vertical_spectrum(interp, bins, feature_flags=feature_flags))
-            
 
         if not args.hide_waterfall:
             print_waterfall()
@@ -758,22 +819,25 @@ def main():
         load_iq_from_file()
         return
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((args.address, args.port))
-
-    logging.info(f"Lyssnar på UDP {args.address}:{args.port}")
-    logging.info(f"Expecting format: {args.format}")
-
-    print(f"Lyssnar på UDP {args.address}:{args.port}")
+    logging.info(f"Format {args.format}")
+    logging.info(f"Parser {args.input}")
+    
+    print(f"Format {args.format}")
+    print(f"Parser {args.input}")
+    
+    print(f"Default: {args.address}:{args.port}")
 
     print(f"Expecting format: {args.format}")
+    
+    setup_input()
+
     try:
-        sock.settimeout(3.0)
         while True:
             try:
                 if protocol_handler:
                     # Custom protocol provides its own data-fetching logic
-                    data = protocol_handler.get_iq_data()
+                    data = protocol_handler.get_data()
+                    
                 else:
                     data, _ = sock.recvfrom(BUFFER_SIZE)
             except socket.timeout:
@@ -872,7 +936,9 @@ def main():
 
             elif args.format == "parse_module":
                 if not parse_module:
-                    print("⚠️ No parse module loaded. Use --parse-module ./path/to/parser.py")
+                    print(
+                        "⚠️ No parse module loaded. Use --parse-module ./path/to/parser.py"
+                    )
                     continue
 
                 try:
@@ -898,18 +964,22 @@ def main():
             store_file.close()
             print(f"IQ-data sparad till {args.store}")
 
+
 import sys, os, select
+
 
 def get_key():
     """Returnerar en tangent om en är nedtryckt, annars None (ingen blockering)."""
-    if os.name == 'nt':
+    if os.name == "nt":
         import msvcrt
+
         key = None
         while msvcrt.kbhit():
-            key = msvcrt.getch().decode('utf-8', errors='ignore')
+            key = msvcrt.getch().decode("utf-8", errors="ignore")
         return key
     else:  # Linux / macOS
         import tty, termios
+
         key = None
         dr, _, _ = select.select([sys.stdin], [], [], 0)
         while dr:
@@ -922,65 +992,63 @@ def get_key():
             dr, _, _ = select.select([sys.stdin], [], [], 0)
         return key
 
+
 def handle_key_press(freqs):
     global maxhold_spectrum, prev_interp, autozoom_count, COLORMAP_RGB
     key = get_key()
 
     if key:
-        
-        
         # Initiera frekvensfönster om None
         if args.freq_min is None or args.freq_max is None:
             args.freq_min = freqs[0]
             args.freq_max = freqs[-1]
-        print(key)
+        
         span = args.freq_max - args.freq_min
         mid = (args.freq_max + args.freq_min) / 2
 
-        if key == 'a':   # vänster
+        if key == "a":  # vänster
             shift = span * 0.1
             args.freq_min -= shift
             args.freq_max -= shift
-        elif key == 'd':  # höger
+        elif key == "d":  # höger
             shift = span * 0.1
             args.freq_min += shift
             args.freq_max += shift
-        elif key == 'w':  # höj dB-max
+        elif key == "w":  # höj dB-max
             args.db_max = args.db_max + 5
             args.db_min = args.db_min + 5
-        elif key == 's':  # sänk dB-min
+        elif key == "s":  # sänk dB-min
             args.db_max = args.db_max - 5
-            args.db_min = args.db_min  - 5
-        elif key == '+':  # zooma in
+            args.db_min = args.db_min - 5
+        elif key == "+":  # zooma in
             span *= 0.9
-            args.freq_min = mid - span/2
-            args.freq_max = mid + span/2
-        elif key == '-':  # zooma ut
+            args.freq_min = mid - span / 2
+            args.freq_max = mid + span / 2
+        elif key == "-":  # zooma ut
             span *= 1.1
-            args.freq_min = mid - span/2
-            args.freq_max = mid + span/2
-        elif key == 'f':  # autozoom en gång
+            args.freq_min = mid - span / 2
+            args.freq_max = mid + span / 2
+        elif key == "f":  # autozoom en gång
             args.auto_zoom = True
             args.auto_zoom_iterations += 1
 
-        elif key =='x':  # random_color
+        elif key == "x":  # random_color
             if args.color_spectrum or args.color_waterfall:
                 args.colormap = "custom"
                 args.custom_colormap = f"{random_hex_color()},{random_hex_color()},64"
-                
+
                 COLORMAP_RGB = get_colormap_rgb(args.colormap)
-            
-        elif key == 'c': # clear
+
+        elif key == "c":  # clear
             # clear old
             sys.stdout.write("\x1b[2J\x1b[H")
 
-        
-        elif key == 'i': # increase line width
+        elif key == "i":  # increase line width
             args.line_width += 1
-        elif key == 'o': # decrease line width
+        elif key == "o":  # decrease line width
             args.line_width -= 1
 
-        elif key == 'r':  # reset
+        elif key == "r":  # reset
             args.freq_min = None
             args.freq_max = None
             args.db_min = -80
@@ -988,17 +1056,18 @@ def handle_key_press(freqs):
             maxhold_spectrum = None
             prev_interp = None
 
-
-        elif key in '0123456789':
-            if key == '0':
+        elif key in "0123456789":
+            if key == "0":
                 args.refresh_rate = None
                 print("\nRefresh rate: unlimited")
             else:
                 args.refresh_rate = int(key)
                 print(f"\nRefresh rate: {args.refresh_rate} fps")
 
+
 def random_hex_color():
     return "#{:06X}".format(random.randint(0, 0xFFFFFF))
+
 
 def parse_vita49_packet(data: bytes):
     if len(data) < 32:
@@ -1014,10 +1083,9 @@ def parse_vita49_packet(data: bytes):
 
     return stream_id, pkt_no, sample_rate, center_freq, payload
 
+
 COLORMAP_RGB = None
 if __name__ == "__main__":
-     
-
     # --- Argument parser ---
     parser = argparse.ArgumentParser(
         description="Terminal-based spectrum and waterfall display"
@@ -1140,9 +1208,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--format",
         type=str,
-        choices=["vita49", "raw", "simulator"],
+        choices=["vita49", "raw", "simulator", "parsemodule"],
         default="vita49",
-        help="Stream format/protocol, e.g., 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)",
+        help="Stream format/protocol, e.g., 'parsemodule' filepath to parsing module, 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)",
     )
 
     parser.add_argument(
@@ -1227,13 +1295,11 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-    "--peak-preserve",
-    type=float,
+        "--peak-preserve",
+        type=float,
         default=0.1,
-    help="Behåll toppar (max) när signalen ökar, slewdown value float."   
+        help="Behåll toppar (max) när signalen ökar, slewdown value float.",
     )
-
-    
 
     # --- Tidsstämpling ---
     parser.add_argument(
@@ -1274,10 +1340,13 @@ if __name__ == "__main__":
         help="FFT size (default = length of input block)",
     )
 
-    parser.add_argument("--input", type=str, default="udp",
-                    help="Input source: 'udp', 'iqfile', 'soupySDR' or path to a Python protocol module.")
+    parser.add_argument(
+        "--input",
+        type=str,
+        default="udp",
+        help="Input source: 'udp', 'iqfile', 'soupySDR' or path to a Python protocol module.",
+    )
     parser.add_argument("--file", type=str, help="Path to IQ file if using 'iqfile'.")
-    
 
     parser.add_argument(
         "--fft-overlap",
@@ -1364,13 +1433,18 @@ if __name__ == "__main__":
         help="Symbol used to mark extracted features (e.g., peak) in the spectrum",
     )
 
-    parser.add_argument("--animate-symbols", action="store_true",
-                        help="Aktivera symbolanimation (övergång mellan symboler)")
-    parser.add_argument("--animate-length", type=int, default=5,
-                        help="Antal steg för symbolövergång innan slutlig symbol")
+    parser.add_argument(
+        "--animate-symbols",
+        action="store_true",
+        help="Aktivera symbolanimation (övergång mellan symboler)",
+    )
+    parser.add_argument(
+        "--animate-length",
+        type=int,
+        default=5,
+        help="Antal steg för symbolövergång innan slutlig symbol",
+    )
 
-    parser.add_argument("--protocol-module", type=str,
-                    help="Path to a Python module implementing a custom radio protocol handler.")
 
     parser.add_argument(
         "--feature-color",
@@ -1392,10 +1466,18 @@ if __name__ == "__main__":
         default=None,
         help="Block size (number of samples per FFT). Default = use fft-size or input length",
     )
+
+    parser.add_argument(
+        "--parse-module",
+        type=str,
+        help="Path to a custom Python parser module implementing parse_data(data) -> (iq_data, meta)",
+    )
+
+    parser.add_argument(
+        "--driver", type=str, default="rtlsdr", help="Name of soupySDR driver to use."
+    )
     
-    parser.add_argument("--parse-module", type=str,
-                    help="Path to a custom Python parser module implementing parse_data(data) -> (iq_data, meta)")
-    
+
     parser.add_argument(
         "--db-min", type=float, default=-80, help="Minimum dB level for display"
     )
@@ -1409,6 +1491,7 @@ if __name__ == "__main__":
     WIDTH = args.bins
     COLORMAP_RGB = get_colormap_rgb(args.colormap)
 
+
     if args.parse_module:
         module_path = os.path.abspath(args.parse_module)
         module_name = os.path.splitext(os.path.basename(module_path))[0]
@@ -1420,21 +1503,10 @@ if __name__ == "__main__":
             parse_module = module
             print(f"✅ Loaded parse module: {module_name}")
         else:
-            print(f"⚠️ Parse module {module_name} missing required function parse_data(data)")
+            print(
+                f"⚠️ Parse module {module_name} missing required function parse_data(data)"
+            )
 
-    if args.protocol_module:
-        module_path = os.path.abspath(args.protocol_module)
-        module_name = os.path.splitext(os.path.basename(module_path))[0]
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        
-        if hasattr(module, "get_iq_data"):
-            protocol_handler = module
-            print(f"✅ Loaded protocol module: {module_name}")
-        else:
-            print(f"⚠️ Module {module_name} does not define get_iq_data() — skipping.")
-    
 
     if args.log:
         logging.basicConfig(

@@ -6,7 +6,7 @@ Second version, with added quality of life features and radio controls.
 TODO:
 
 ### Added
-- Added live spectrum movement interactions arrows, f, r, +, -, refresh rate, c, x.
+- Added live spectrum movement interactions arrows, f, r, +, -, refresh rate, c, x, i, o.
 - Added attack/decay of spectrum values
 
 - Added animation symbol and color solution

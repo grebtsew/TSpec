@@ -28,6 +28,11 @@ TSpec [OPTIONS]
 
 # Controls
 
+The following demo is started using the following flags:
+```bash
+...
+```
+
 (control_demo)[./docs/control_demo.gif]
 
 - w,a,s,d - movement in spectrum
@@ -38,6 +43,7 @@ TSpec [OPTIONS]
 - 1-9 - refresh-rate, 0 - unlimited
 - i-o - line-width
 - r - reset 
+
 
 # Examples 
 These examples uses windows executable:
@@ -59,6 +65,11 @@ TSpec.exe --color-waterfall --color-spectrum --colormap inferno --spectrum-symbo
 Using custom color themes and line graph with set refresh rate:
 ```bash
 TSpec.exe --color-waterfall --color-waterfall --color-spectrum --colormap inferno --spectrum-symbol " " --spectrum-symbol-color-background --format raw  --line-width 3 --line --format raw   --colormap custom --custom-colormap "#000000,#aa0000,64" --refresh-rate 10
+```
+
+Using example modules:
+```bash
+python ./src/TSpec.py --bins 80 --spectrum-height 20 --waterfall-height 5 --format raw --input ./modules/source/random_source_module.py --format parse_module --parse-module ./modules/parse/custom_parser_module.py
 ```
 
 ## Run (for developers, python and docker users)
