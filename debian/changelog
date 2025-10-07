@@ -9,6 +9,7 @@ TODO:
 - Added live spectrum movement interactions arrows, f, r, +, -, refresh rate, c, x, i, o.
 - Added attack/decay of spectrum values
 - Added modular parse/input modules, updated readme
+- Added phosphor effect in spectrum
 
 
 - Added animation symbol and color solution

@@ -91,10 +91,10 @@ def setup_input():
 
     # --- 3️⃣ IQ-fil ---
     elif args.input.lower() == "iqfile":
-        if not args.filepath:
-            raise ValueError("❌ Missing --filepath argument for iqfile input")
-        iqfile = open(args.filepath, "rb")
-        print(f"✅ Reading IQ data from file: {args.filepath}")
+        if not args.iqfilepath:
+            raise ValueError("❌ Missing --iqfilepath argument for iqfile input")
+        iqfile = open(args.iqfilepath, "rb")
+        print(f"✅ Reading IQ data from file: {args.iqfilepath}")
 
     # --- 4️⃣ SoapySDR (placeholder) ---
     elif args.input.lower() == "soapysdr":
@@ -296,6 +296,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     w = max(1, int(args.line_width))
     half = w // 2
 
+    
     for h in range(HEIGHT - 1, -1, -1):
         db_label = f"{min_db + h * step_db:5.1f} "
         row = [db_label]
@@ -307,7 +308,8 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                 b_right = bars[i + 1] if i < len(bars) - 1 else b
 
                 if dist <= half or (b_left <= h <= b) or (b_right <= h <= b):
-                    base_idx = int(levels[i] * (len(COLORMAP_RGB) - 1))
+                    level_val = np.nan_to_num(levels[i], nan=0.0)  # NaN → 0
+                    base_idx = int(level_val * (len(COLORMAP_RGB) - 1))
                     r, g, bb = COLORMAP_RGB[base_idx]
 
                     vertical_dist = max(0, b - h)
@@ -691,6 +693,9 @@ def process_iq(iq_data, meta):
                     new_thresholds = {}
                     for i, sym in enumerate(symbols):
                         thresh = min_val + i * step
+                        # Om thresh är NaN, ersätt med min_val
+                        if np.isnan(thresh):
+                            thresh = 0  
                         new_thresholds[int(round(thresh))] = sym
                     THRESHOLDS = new_thresholds
 
@@ -838,6 +843,7 @@ def process_iq(iq_data, meta):
 
 
 def main():
+    global iqfile
     logging.info(f"Starting system!")
     logging.info(f"Settings: {args}")
 
@@ -868,8 +874,22 @@ def main():
                     # Custom protocol provides its own data-fetching logic
                     data = protocol_handler.get_data()
                     
-                else:
+                elif args.input == "udp":
                     data, _ = sock.recvfrom(BUFFER_SIZE)
+                elif args.input == "iqfile":
+                    if iqfile is None:
+                        raise ValueError("❌ iqfile not opened correctly!")
+
+                    # Läs en chunk
+                    block_size = getattr(args, "block_size", None) or args.packet_size    # antal komplexa sampel per chunk
+                    print(block_size)
+                    chunk_size = block_size * 2 * 4  # I + Q, float32
+                    data = iqfile.read(chunk_size)
+                    if not data:  # nått slutet av filen, rewind
+                        print("⚠️ Reached end of IQ file, rewinding...")
+                        iqfile.seek(0)
+                        data = iqfile.read(chunk_size)
+
             except socket.timeout:
                 continue
             except Exception as e:
@@ -990,6 +1010,8 @@ def main():
     finally:
         if sock is not None:
             sock.close()
+        if iqfile is not None:
+            iqfile.close()
         logging.info(f"Closing system!")
         if args.store:
             store_file.close()
@@ -1188,6 +1210,14 @@ if __name__ == "__main__":
         default=None,
         help="Maximum frequency in spectrum to display (Hz)",
     )
+
+    parser.add_argument(
+    "--packet-size",
+    type=int,
+    default=4096,
+    help="Number of complex IQ samples to read per chunk from file"
+    )
+
 
     parser.add_argument(
         "--store",
@@ -1420,6 +1450,14 @@ if __name__ == "__main__":
         default=0,
         help="Number of iterations to perform autozooming (0 = infinite)",
     )
+
+    parser.add_argument(
+        "--iqfilepath",
+        type=str,
+        default="./simulation.iq",
+        help="Path to iq data stream file.",
+    )
+
 
     parser.add_argument(
         "--clear-on-new-frame",

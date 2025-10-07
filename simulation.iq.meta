@@ -1,0 +1,11 @@
+{
+  "stream_id": "synthetic_stream",
+  "center_frequency": 0.0,
+  "sample_rate": 48000,
+  "tone_freqs": [
+    2000,
+    5000,
+    12000
+  ],
+  "packet_size": 4096
+}
