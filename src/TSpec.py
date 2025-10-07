@@ -539,6 +539,8 @@ def process_iq(iq_data, meta):
         if not args.no_normalize:
             power_db = power_db - np.max(power_db)
 
+
+
         if args.db_min is not None:
             power_db = np.maximum(power_db, args.db_min)  # allt under db-min klipps
         if args.db_max is not None:
@@ -944,9 +946,11 @@ def handle_key_press(freqs):
             args.freq_min += shift
             args.freq_max += shift
         elif key == 'w':  # höj dB-max
-            args.db_max = (args.db_max or 0) + 5
+            args.db_max = args.db_max + 5
+            args.db_min = args.db_min + 5
         elif key == 's':  # sänk dB-min
-            args.db_min = (args.db_min or -100) - 5
+            args.db_max = args.db_max - 5
+            args.db_min = args.db_min  - 5
         elif key == '+':  # zooma in
             span *= 0.9
             args.freq_min = mid - span/2
@@ -969,6 +973,12 @@ def handle_key_press(freqs):
         elif key == 'c': # clear
             # clear old
             sys.stdout.write("\x1b[2J\x1b[H")
+
+        
+        elif key == 'i': # increase line width
+            args.line_width += 1
+        elif key == 'o': # decrease line width
+            args.line_width -= 1
 
         elif key == 'r':  # reset
             args.freq_min = None

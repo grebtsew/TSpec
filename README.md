@@ -11,7 +11,6 @@ TSpec is a minimalist, high-performance terminal-based spectrum and waterfall di
 ![commit](https://img.shields.io/github/last-commit/grebtsew/TSpec)
 
 
-
 # Run (for simple usage)
 
 Download executable [here](https://github.com/grebtsew/TSpec/releases) from latest release and get going. I recommend placing the application in system programs a using enviroment variables.
@@ -25,6 +24,20 @@ Linux:
 ```bash
 TSpec [OPTIONS]
 ```
+
+
+# Controls
+
+(control_demo)[./docs/control_demo.gif]
+
+- w,a,s,d - movement in spectrum
+- +,- - zoom in and out
+- f - auto zoom focus on signals
+- c - clear frame, removes old symbols
+- x - random color theme
+- 1-9 - refresh-rate, 0 - unlimited
+- i-o - line-width
+- r - reset 
 
 # Examples 
 These examples uses windows executable:
@@ -47,10 +60,6 @@ Using custom color themes and line graph with set refresh rate:
 ```bash
 TSpec.exe --color-waterfall --color-waterfall --color-spectrum --colormap inferno --spectrum-symbol " " --spectrum-symbol-color-background --format raw  --line-width 3 --line --format raw   --colormap custom --custom-colormap "#000000,#aa0000,64" --refresh-rate 10
 ```
-
-# Controls
-
-(control_demo)[./docs/control_demo.gif]
 
 ## Run (for developers, python and docker users)
 Run in python use:
