@@ -36,12 +36,13 @@ The following demo is started using the following flags:
 (control_demo)[./docs/control_demo.gif]
 
 - w,a,s,d - movement in spectrum
-- +,- - zoom in and out
+- +,- - zoom in and out in freq
+- ,,. - zoom in and out in db
 - f - auto zoom focus on signals
 - c - clear frame, removes old symbols
 - x - random color theme
 - 1-9 - refresh-rate, 0 - unlimited
-- i-o - line-width
+- i-o - line-width (3d effect)
 - r - reset 
 
 
@@ -69,7 +70,7 @@ TSpec.exe --color-waterfall --color-waterfall --color-spectrum --colormap infern
 
 Using example modules:
 ```bash
-python ./src/TSpec.py --bins 80 --spectrum-height 20 --waterfall-height 5 --format raw --input ./modules/source/random_source_module.py --format parse_module --parse-module ./modules/parse/custom_parser_module.py
+python ./src/TSpec.py --bins 80 --spectrum-height 20 --waterfall-height 5 --input ./modules/source/random_source_module.py --format ./modules/parse/custom_parser_module.py
 ```
 
 ## Run (for developers, python and docker users)
@@ -159,7 +160,11 @@ The table below describes all available command-line flags and their correspondi
 | `--feature-avg-offset` | Offset for feature extraction detection, threshold avg + this offset. | 5 |
 
 
+# Modules
 
+## Input modules
+
+## Parse modules
 
 
 # Features
@@ -192,10 +197,6 @@ pytest .
 
 # Format
 This repository uses python `black` to keep code format.
-
-# License
-The project uses MIT License, read more [here](./License).
-
 
 # License
 The project uses MIT License, read more [here](./License).

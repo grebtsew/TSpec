@@ -7,6 +7,7 @@ import struct
 import time
 import logging
 import random
+import sys, os, select
 
 import importlib.util
 
@@ -40,6 +41,25 @@ except ImportError:
 sock = None
 iqfile = None
 sdr = None
+
+def setup_format():
+    global parse_module
+    
+    if args.format.endswith(".py"):
+        module_path = os.path.abspath(args.format)
+        module_name = os.path.splitext(os.path.basename(module_path))[0]
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        if hasattr(module, "parse_data"):
+            parse_module = module
+            print(f"✅ Loaded parse module: {module_name}")
+        else:
+            print(
+                f"⚠️ Parse module {module_name} missing required function parse_data(data)"
+            )
+
 
 def setup_input():
     global sock, protocol_handler, iqfile, sdr
@@ -258,6 +278,15 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     max_db = args.db_max if args.db_max is not None else np.max(power_db)
     denom = max_db - min_db + 1e-12
     levels = np.clip((power_db - min_db) / denom, 0, 1)
+    if args.phosphor:
+        global phosphor_levels
+        decay = getattr(args, "phosphor_decay", 0.85)
+        if "phosphor_levels" not in globals() or phosphor_levels.shape != levels.shape:
+            phosphor_levels = levels.copy()
+        else:
+            phosphor_levels = phosphor_levels * decay + levels * (1 - decay)
+        levels = phosphor_levels
+    
     bars = (levels * (HEIGHT - 1)).astype(int)
 
     rows = []
@@ -830,6 +859,7 @@ def main():
     print(f"Expecting format: {args.format}")
     
     setup_input()
+    setup_format()
 
     try:
         while True:
@@ -934,10 +964,10 @@ def main():
 
                 process_iq(iq_data, meta)
 
-            elif args.format == "parse_module":
+            elif args.format.endswith(".py"):
                 if not parse_module:
                     print(
-                        "⚠️ No parse module loaded. Use --parse-module ./path/to/parser.py"
+                        "⚠️ No parse module loaded. Use --format ./path/to/parser.py"
                     )
                     continue
 
@@ -958,14 +988,14 @@ def main():
     except KeyboardInterrupt:
         print("\nAvslutar mottagare...")
     finally:
-        sock.close()
+        if sock is not None:
+            sock.close()
         logging.info(f"Closing system!")
         if args.store:
             store_file.close()
             print(f"IQ-data sparad till {args.store}")
 
 
-import sys, os, select
 
 
 def get_key():
@@ -1004,7 +1034,11 @@ def handle_key_press(freqs):
             args.freq_max = freqs[-1]
         
         span = args.freq_max - args.freq_min
-        mid = (args.freq_max + args.freq_min) / 2
+        freq_mid = (args.freq_max + args.freq_min) / 2
+
+        
+        db_span = args.db_max - args.db_min
+        db_mid = (args.db_max + args.db_min) / 2
 
         if key == "a":  # vänster
             shift = span * 0.1
@@ -1015,39 +1049,44 @@ def handle_key_press(freqs):
             args.freq_min += shift
             args.freq_max += shift
         elif key == "w":  # höj dB-max
-            args.db_max = args.db_max + 5
-            args.db_min = args.db_min + 5
+            shift = db_span * 0.1
+            args.db_max += shift
+            args.db_min += shift
         elif key == "s":  # sänk dB-min
-            args.db_max = args.db_max - 5
-            args.db_min = args.db_min - 5
+            shift = db_span * 0.1
+            args.db_max -= shift
+            args.db_min -= shift
         elif key == "+":  # zooma in
             span *= 0.9
-            args.freq_min = mid - span / 2
-            args.freq_max = mid + span / 2
+            args.freq_min = freq_mid - span / 2
+            args.freq_max = freq_mid + span / 2
         elif key == "-":  # zooma ut
             span *= 1.1
-            args.freq_min = mid - span / 2
-            args.freq_max = mid + span / 2
+            args.freq_min = freq_mid - span / 2
+            args.freq_max = freq_mid + span / 2
+        elif key == ",":
+            db_span *= 0.9
+            args.db_min = db_mid - db_span / 2
+            args.db_max = db_mid + db_span / 2
+        elif key == ".":
+            db_span *= 1.1
+            args.db_min = db_mid - db_span / 2
+            args.db_max = db_mid + db_span / 2    
         elif key == "f":  # autozoom en gång
             args.auto_zoom = True
             args.auto_zoom_iterations += 1
-
         elif key == "x":  # random_color
             if args.color_spectrum or args.color_waterfall:
                 args.colormap = "custom"
                 args.custom_colormap = f"{random_hex_color()},{random_hex_color()},64"
-
                 COLORMAP_RGB = get_colormap_rgb(args.colormap)
-
         elif key == "c":  # clear
             # clear old
             sys.stdout.write("\x1b[2J\x1b[H")
-
         elif key == "i":  # increase line width
             args.line_width += 1
         elif key == "o":  # decrease line width
             args.line_width -= 1
-
         elif key == "r":  # reset
             args.freq_min = None
             args.freq_max = None
@@ -1208,9 +1247,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--format",
         type=str,
-        choices=["vita49", "raw", "simulator", "parsemodule"],
-        default="vita49",
-        help="Stream format/protocol, e.g., 'parsemodule' filepath to parsing module, 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)",
+        default="raw",
+        help="Stream format/protocol, e.g., './' filepath to parsing module, 'vita49' (VITA-49), 'raw' (raw IQ samples), 'simulator' (simulated data)",
     )
 
     parser.add_argument(
@@ -1426,6 +1464,12 @@ if __name__ == "__main__":
         help="Show maximum value per bin across frames instead of current spectrum",
     )
 
+    parser.add_argument("--phosphor", action="store_true",
+                    help="Enable CRT-style phosphor persistence effect on spectrum")
+    parser.add_argument("--phosphor-decay", type=float, default=0.85,
+                    help="Decay factor for phosphor effect (0.0–1.0, lower = faster fade)")
+
+
     parser.add_argument(
         "--feature-symbol",
         type=str,
@@ -1468,16 +1512,9 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--parse-module",
-        type=str,
-        help="Path to a custom Python parser module implementing parse_data(data) -> (iq_data, meta)",
-    )
-
-    parser.add_argument(
         "--driver", type=str, default="rtlsdr", help="Name of soupySDR driver to use."
     )
     
-
     parser.add_argument(
         "--db-min", type=float, default=-80, help="Minimum dB level for display"
     )
@@ -1492,21 +1529,7 @@ if __name__ == "__main__":
     COLORMAP_RGB = get_colormap_rgb(args.colormap)
 
 
-    if args.parse_module:
-        module_path = os.path.abspath(args.parse_module)
-        module_name = os.path.splitext(os.path.basename(module_path))[0]
-        spec = importlib.util.spec_from_file_location(module_name, module_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-
-        if hasattr(module, "parse_data"):
-            parse_module = module
-            print(f"✅ Loaded parse module: {module_name}")
-        else:
-            print(
-                f"⚠️ Parse module {module_name} missing required function parse_data(data)"
-            )
-
+    
 
     if args.log:
         logging.basicConfig(
