@@ -2,22 +2,24 @@
 
 ## [1.1.0] - 2025-10-04
 
-Second version, with added quality of life features and radio controls.
-TODO:
+Second version, with added quality of life features and general radio controls using soupySDR.
 
 ### Added
 - Added live spectrum movement interactions arrows, f, r, +, -, refresh rate, c, x, i, o.
 - Added attack/decay of spectrum values
 - Added modular parse/input modules, updated readme
 - Added phosphor effect in spectrum
+- Added iqfile mode and example
 
-
-- Added animation symbol and color solution
+TODO:
+- Added animation symbol and color solution, highlight of data derivate
 - Added Deb package building for future apt-get package, follow debian policy
 - Added example sweeping rtl-sdr 
 - Added soupy-sdr controls
-- Added iqfile mode and example
 - Added documentation about creation of parsing-modules
+
+TODO: gnuradio example
+
 
 ### Changed
 - Set min-max db per default

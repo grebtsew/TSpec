@@ -889,6 +889,9 @@ def main():
                         print("⚠️ Reached end of IQ file, rewinding...")
                         iqfile.seek(0)
                         data = iqfile.read(chunk_size)
+                elif args.input == "soupysdr":
+                    # TODO:
+                    pass
 
             except socket.timeout:
                 continue

@@ -34,7 +34,7 @@ The following demo is started using the following flags:
 ```
 
 (control_demo)[./docs/control_demo.gif]
-
+TODO:
 - w,a,s,d - movement in spectrum
 - +,- - zoom in and out in freq
 - ,,. - zoom in and out in db
@@ -158,12 +158,12 @@ The table below describes all available command-line flags and their correspondi
 | `--feature-symbol` | Symbol used to mark extracted features (e.g., peak) in the spectrum. | * |
 | `--feature-color` | Color for extracted feature (format: 'R,G,B' 0-255), overrides symbol color if set. | None |
 | `--feature-avg-offset` | Offset for feature extraction detection, threshold avg + this offset. | 5 |
-
+TODO:
 
 # Modules
-
+TODO:
 ## Input modules
-
+TODO:
 ## Parse modules
 
 
@@ -176,6 +176,7 @@ The table below describes all available command-line flags and their correspondi
 - Ability to save incoming IQ data to a file and load IQ data from files for replay.
 - Adjustable display settings including spectrum height, waterfall height, symbol choice, and line/bar modes.
 - Supports maximum refresh rates and clamping of rapid dB changes for smoother visualizations.
+TODO:
 
 # Input
 
@@ -184,6 +185,12 @@ The input folder contains the following input-examples:
 - microphone data as raw
 - simulator data as raw
 - simulator data as simulator (own) format
+- simulator iqfile stream example data to file
+- soupy raw example for streaming soupySDR data over udp
+
+# System diagram
+
+TODO:
 
 # Dependencies
 
