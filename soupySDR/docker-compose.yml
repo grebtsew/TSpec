@@ -1,0 +1,20 @@
+version: "3.9"
+
+# Kör med:
+# docker-compose -f ./soupysdr/docker-compose.yml up --build
+
+services:
+  soupysdr:
+    build:
+      context: ./
+      dockerfile: ./Dockerfile
+    container_name: soupysdr
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb         # För USB-passthrough på Linux / WSL2
+      - ./data:/app/data                  # För ev. loggar eller sparfiler
+    environment:
+      - PYTHONUNBUFFERED=1
+    network_mode: "bridge"
+    stdin_open: true
+    tty: true
