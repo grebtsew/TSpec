@@ -14,9 +14,12 @@ Second version, with added quality of life features and general radio controls u
 TODO:
 - Added animation symbol and color solution, highlight of data derivate
 - Added Deb package building for future apt-get package, follow debian policy
+- Added documentation about creation of parsing-modules
+- Added SNR calculation
+
+hw-
 - Added example sweeping rtl-sdr 
 - Added soupy-sdr controls
-- Added documentation about creation of parsing-modules
 - Added tcp support for rtl_tcp
 
 TODO: gnuradio example

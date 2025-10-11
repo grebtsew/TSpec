@@ -1,1 +1,4 @@
 python TSpec.py --thresholds '\-45:|,\-50:-,\-65:.' --waterfall-height 40 --bins 200 --color-waterfall --color-spectrum --colormap inferno --spectrum-symbol " " --spectrum-symbol-color-background --freq-min 0 --freq-max 500000 --spectrum-height 20 --line-width 3 --bar --format raw --refresh-rate 1 --max-delta-db 1 --auto-zoom --auto-zoom-threshold 10 --colormap custom --custom-colormap "#000000,#ff0000,64"
+
+
+python ./src/TSpec.py --bins 200 --spectrum-height 20 --waterfall-height 5 --color-spectrum --color-waterfall --input ./modules/source/random_source_module.py --format ./modules/parse/custom_parser_module.py --spectrum-symbol-color-background --spectrum-symbol " " --line
