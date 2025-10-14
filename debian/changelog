@@ -10,12 +10,14 @@ Second version, with added quality of life features and general radio controls u
 - Added modular parse/input modules, updated readme
 - Added phosphor effect in spectrum
 - Added iqfile mode and example
+- Added SNR calculation
 
 TODO:
 - Added animation symbol and color solution, highlight of data derivate
+
 - Added Deb package building for future apt-get package, follow debian policy
 - Added documentation about creation of parsing-modules
-- Added SNR calculation
+
 
 hw-
 - Added example sweeping rtl-sdr 
