@@ -9,7 +9,9 @@
     # --- Installera Pythonberoenden ---
     COPY ./requirements.txt /requirements.txt
     RUN pip install --no-cache-dir -r /requirements.txt
-    RUN pip install soupysdr
+    
+    # TODO: install soupysdr
+    # TODO: testrun
     
     WORKDIR /app
     

@@ -13,9 +13,10 @@ import importlib.util
 
 protocol_handler = None
 
+GLOBAL_DB_MIN = -100
+GLOBAL_DB_MAX = 0
+
 parse_module = None
-
-
 
 last_update = 0.0
 
@@ -234,7 +235,9 @@ waterfall_counter = 0  # global
 
 
 def add_waterfall(power_db, freqs=None):
-    global waterfall_counter, COLORMAP_RGB
+    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX 
+    min_db = args.db_min if args.db_min is not None else np.min(power_db)
+    max_db = args.db_max if args.db_max is not None else np.max(power_db)
     waterfall_counter += 1
     if waterfall_counter < args.waterfall_speed:
         return  # hoppa över den här uppdateringen
@@ -247,12 +250,23 @@ def add_waterfall(power_db, freqs=None):
         norm = np.nan_to_num(norm, nan=0.0, posinf=1.0, neginf=0.0)
         norm = np.clip(norm, 0.0, 1.0)
 
-        # Apply gamma correction
-        gamma = args.waterfall_gamma if args.waterfall_gamma is not None else 1.0
-        norm = norm**gamma
+     
 
-        for n in norm:
-            r, g, bb = COLORMAP_RGB[int(n * (len(COLORMAP_RGB) - 1))]
+        # Apply gamma correction
+        levels = np.clip((power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1)
+        levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
+        levels = np.clip(levels, 0.0, 1.0)
+
+        gamma = args.gamma if args.gamma is not None else 1.0
+
+        for level_val in levels:
+            # Gamma-korrigering
+            level_val_gamma = level_val ** gamma
+
+            # Hämta färg från colormap
+            base_idx = int(level_val_gamma * (len(COLORMAP_RGB) - 1))
+            r, g, bb = COLORMAP_RGB[base_idx]
+            
             row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
     else:
         sorted_thresholds = sorted(THRESHOLDS.items())
@@ -266,7 +280,7 @@ def add_waterfall(power_db, freqs=None):
 
 
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
-    global COLORMAP_RGB
+    global COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
 
     if f_min is None:
@@ -277,7 +291,8 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     min_db = args.db_min if args.db_min is not None else np.min(power_db)
     max_db = args.db_max if args.db_max is not None else np.max(power_db)
     denom = max_db - min_db + 1e-12
-    levels = np.clip((power_db - min_db) / denom, 0, 1)
+    levels = np.clip((power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1)
+    levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
     if args.phosphor:
         global phosphor_levels
         decay = getattr(args, "phosphor_decay", 0.85)
@@ -309,18 +324,29 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
 
                 if dist <= half or (b_left <= h <= b) or (b_right <= h <= b):
                     level_val = np.nan_to_num(levels[i], nan=0.0)  # NaN → 0
-                    base_idx = int(level_val * (len(COLORMAP_RGB) - 1))
+                    gamma = args.gamma if args.gamma is not None else 1.0
+                    level_val_gamma = level_val ** gamma
+                    base_idx = int(level_val_gamma * (len(COLORMAP_RGB) - 1))
                     r, g, bb = COLORMAP_RGB[base_idx]
 
-                    vertical_dist = max(0, b - h)
-                    fade = 1.0
-                    if half > 0:
-                        fade = 1.0 - 0.1 * min(dist, vertical_dist) / (half + 1e-12)
-                        fade = max(0.1, fade)
+                    if args.descend_line_color:
+                        vertical_dist = max(0, b - h)
+                        fade = 1.0
+                        if half > 0:
+                            fade = 1.0 - args.line_color_fade_strength  * min(dist, vertical_dist) / (half + 1e-12)
+                    else:
+                        fade = 1.0
+                        if half > 0:
+                            fade = 1.0 - args.line_color_fade_strength  * dist / (half + 1e-12)
 
-                    r_f = int(r * 255 * fade + 255 * (1 - fade))
-                    g_f = int(g * 255 * fade + 255 * (1 - fade))
-                    b_f = int(bb * 255 * fade + 255 * (1 - fade))
+                    # Clamp fade mellan 0 och 1 (kan bli helt svart)
+                    fade = max(0.0, min(1.0, fade))
+                    
+
+                    # Applicera fade mot svart
+                    r_f = int(r * 255 * fade)
+                    g_f = int(g * 255 * fade)
+                    b_f = int(bb * 255 * fade)
 
                     draw_symbol = symbol
                     # Lägg till feature-symbol på toppen av stapeln
@@ -333,6 +359,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                                         int(x) for x in args.feature_color.split(",")
                                     ]
                                 except:
+                                    
                                     r_fc, g_fc, b_fc = 255, 255, 255
                                 # Skriv över alla andra färger
                                 if args.spectrum_symbol_color_background:
@@ -1150,10 +1177,24 @@ def parse_vita49_packet(data: bytes):
 
 COLORMAP_RGB = None
 if __name__ == "__main__":
+
     # --- Argument parser ---
     parser = argparse.ArgumentParser(
         description="Terminal-based spectrum and waterfall display"
     )
+    parser.add_argument(
+        "--line-color-fade-strength",
+        type=float,
+        default=0.2,
+        help="Determines how much line colors fade.",
+    )
+
+    parser.add_argument(
+        "--descend-line-color",
+        action="store_true",
+        help="Make coloring of lines descending instead of symmetric.",
+    )
+
     parser.add_argument(
         "--rssi",
         action="store_true",
@@ -1470,10 +1511,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--waterfall-gamma",
+        "--gamma",
         type=float,
         default=1.0,
-        help="Gamma correction for waterfall colors (default=1.0, linear)",
+        help="Gamma correction for colors (default=1.0, linear)",
     )
 
     parser.add_argument(
@@ -1570,6 +1611,8 @@ if __name__ == "__main__":
     COLORMAP_RGB = get_colormap_rgb(args.colormap)
 
 
+    GLOBAL_DB_MAX = args.db_max
+    GLOBAL_DB_MIN = args.db_min
     
 
     if args.log:
