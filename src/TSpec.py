@@ -236,8 +236,7 @@ waterfall_counter = 0  # global
 
 def add_waterfall(power_db, freqs=None):
     global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX 
-    min_db = args.db_min if args.db_min is not None else np.min(power_db)
-    max_db = args.db_max if args.db_max is not None else np.max(power_db)
+    
     waterfall_counter += 1
     if waterfall_counter < args.waterfall_speed:
         return  # hoppa över den här uppdateringen
@@ -250,9 +249,7 @@ def add_waterfall(power_db, freqs=None):
         norm = np.nan_to_num(norm, nan=0.0, posinf=1.0, neginf=0.0)
         norm = np.clip(norm, 0.0, 1.0)
 
-     
 
-        # Apply gamma correction
         levels = np.clip((power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1)
         levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
         levels = np.clip(levels, 0.0, 1.0)
@@ -290,9 +287,15 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
 
     min_db = args.db_min if args.db_min is not None else np.min(power_db)
     max_db = args.db_max if args.db_max is not None else np.max(power_db)
-    denom = max_db - min_db + 1e-12
-    levels = np.clip((power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1)
+    
+    color_levels = np.clip(
+    (power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1
+    )   
+
+    levels = np.clip((power_db - min_db) / (max_db - min_db + 1e-12), 0, 1)
     levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
+    levels = np.clip(levels, 0.0, 1.0)
+    
     if args.phosphor:
         global phosphor_levels
         decay = getattr(args, "phosphor_decay", 0.85)
@@ -323,7 +326,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                 b_right = bars[i + 1] if i < len(bars) - 1 else b
 
                 if dist <= half or (b_left <= h <= b) or (b_right <= h <= b):
-                    level_val = np.nan_to_num(levels[i], nan=0.0)  # NaN → 0
+                    level_val = np.nan_to_num(color_levels[i], nan=0.0)  # NaN → 0
                     gamma = args.gamma if args.gamma is not None else 1.0
                     level_val_gamma = level_val ** gamma
                     base_idx = int(level_val_gamma * (len(COLORMAP_RGB) - 1))
@@ -420,7 +423,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         rows.append("".join(row))
 
     # Tick-linje och etiketter med dynamisk enhet
-    tick_line = "      " + "-" * WIDTH
+    tick_line = "  dB  " + "-" * WIDTH
     label_line = [" "] * (WIDTH + 6)
     num_ticks = 6
     tick_freqs = [
@@ -655,19 +658,29 @@ def process_iq(iq_data, meta):
 
         handle_key_press(freqs)
 
-        # Power (lin/log) + normalisering
-        if args.waterfall_scale == "linear":
-            power_db = np.abs(spectrum)
+        if args.ref_voltage is not None:
+            # Absolut effekt i dBm
+            V_rms = np.abs(spectrum) * args.ref_voltage / np.sqrt(2)  # RMS
+            P_watt = (V_rms ** 2) / args.load_ohm
+            P_mw = P_watt * 1000
+            power_db = 10 * np.log10(P_mw + 1e-12)
         else:
-            power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
+            # Relativ dB
+            if args.waterfall_scale == "linear":
+                power_db = np.abs(spectrum)
+            else:
+                power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
 
-        if not args.no_normalize:
-            power_db = power_db - np.max(power_db)
+            if not args.no_normalize:
+                power_db = power_db - np.max(power_db)
 
-        if args.db_min is not None:
-            power_db = np.maximum(power_db, args.db_min)  # allt under db-min klipps
-        if args.db_max is not None:
-            power_db = np.minimum(power_db, args.db_max)  # allt över db-max klipps
+ 
+        
+
+        #if args.db_min is not None:
+        #    power_db = np.maximum(power_db, args.db_min)  # allt under db-min klipps
+        #if args.db_max is not None:
+        #   power_db = np.minimum(power_db, args.db_max)  # allt över db-max klipps
 
         if args.agc:
             if not hasattr(process_iq, "agc_level"):
@@ -683,11 +696,12 @@ def process_iq(iq_data, meta):
             power_db -= process_iq.agc_level
 
         # 4️⃣ Clip to db-min / db-max
-        if args.db_min is not None:
-            power_db = np.maximum(power_db, args.db_min)
-        if args.db_max is not None:
-            power_db = np.minimum(power_db, args.db_max)
+        #if args.db_min is not None:
+        #    power_db = np.maximum(power_db, args.db_min)
+        #if args.db_max is not None:
+        #    power_db = np.minimum(power_db, args.db_max)
         # f_min / f_max (behöver freqs här, därför inuti loopen)
+        
         f_min = args.freq_min if args.freq_min is not None else freqs[0]
         f_max = args.freq_max if args.freq_max is not None else freqs[-1]
 
@@ -744,13 +758,16 @@ def process_iq(iq_data, meta):
         # Skapa bins för display baserat på det nuvarande fönstret
         bins = np.linspace(args.freq_min, args.freq_max, WIDTH)
 
-        # Interpolera spektrum till bins, fyll utanför med lågt värde (db_min)
+        mask = (freqs >= f_min) & (freqs <= f_max)
+        masked_power = np.full_like(power_db, GLOBAL_DB_MIN)
+        masked_power[mask] = power_db[mask]
+
         interp = np.interp(
             bins,
             freqs,
-            power_db,
-            left=args.db_min if args.db_min is not None else -100,
-            right=args.db_min if args.db_min is not None else -100,
+            masked_power,
+            left=GLOBAL_DB_MIN,
+            right=GLOBAL_DB_MIN,
         )
 
         # --- Avg-blocks ---
@@ -815,10 +832,17 @@ def process_iq(iq_data, meta):
 
         # Visa peak i interpolationen# Hitta peak inom det zoomade fönstret
         peak_idx = np.argmax(power_zoom)
+        peak_power_db = power_zoom[peak_idx]  
         peak_freq = freqs_zoom[peak_idx]
-        peak_bin = int(
-            (peak_freq - args.freq_min) / (args.freq_max - args.freq_min) * (WIDTH - 1)
-        )
+
+        if args.freq_min is None or args.freq_max is None or args.freq_max == args.freq_min:
+            peak_bin = WIDTH // 2  # visa mitt i displayen om fönstret ej giltigt
+        else:
+            freq_span = args.freq_max - args.freq_min
+            peak_bin = int((peak_freq - args.freq_min) / freq_span * (WIDTH - 1))
+            peak_bin = max(0, min(WIDTH - 1, peak_bin))  # clamp till [0, WIDTH-1]
+
+        
 
         if 0 <= peak_bin < WIDTH:
             interp[peak_bin] = max(interp[peak_bin], power_zoom[peak_idx])
@@ -839,6 +863,7 @@ def process_iq(iq_data, meta):
                 feature_flags[i] = True
 
         # Waterfall + utskrift (oförändrat)
+
         add_waterfall(interp, bins)
         if args.clear_on_new_frame:
             sys.stdout.write("\x1b[2J\x1b[H")
@@ -850,16 +875,26 @@ def process_iq(iq_data, meta):
 
         print(
             f"Stream {meta.get('stream_id','-')}  CF {meta.get('center_frequency',0)/1e6:.3f} MHz  "
+            f"{peak_power_db:.2f} dB  "
             f"SR {meta.get('sample_rate',0)/1e6:.2f} Msps  Peak: {peak_freq/1e6:.3f} MHz  Mode: {mode}{extra}"
         )
         if args.timestamp:
             print(time.strftime("[%Y-%m-%d %H:%M:%S]"), end=" ")
 
         if args.rssi:
-            # Konvertera från dB till linjär skala för medelvärde
-            linear_power = 10 ** (interp / 10.0)
-            rssi_val = 10 * np.log10(np.mean(linear_power) + 1e-12)
-            print(f"RSSI: {rssi_val:.2f} dB ")
+            # Begränsa till fönstret användaren tittar på
+            mask = (bins >= args.freq_min) & (bins <= args.freq_max)
+            visible_bins = bins[mask]
+            visible_power = interp[mask]
+
+            if len(visible_power) > 0:
+                # Konvertera från dB till linjär skala för medelvärde
+                linear_power = 10 ** (visible_power / 10.0)
+                rssi_val = 10 * np.log10(np.mean(linear_power) + 1e-12)
+                print(f"RSSI [{args.freq_min/1e6:.3f}-{args.freq_max/1e6:.3f} MHz]: {rssi_val:.2f} dB                        ")
+            else:
+                print("RSSI: (inget inom valt frekvensspann)")
+
         if not args.hide_spectrum:
             print("Spectrum (dB):")
             print(vertical_spectrum(interp, bins, feature_flags=feature_flags))
@@ -1569,6 +1604,22 @@ if __name__ == "__main__":
         type=int,
         default=5,
         help="Antal steg för symbolövergång innan slutlig symbol",
+    )
+
+    parser.add_argument(
+    "--ref-voltage",
+    type=float,
+    default=None,
+    help=(
+        "Referens RMS-spänning för enhetsamplitud (float32) i volt. "
+        "Behövs för att beräkna absolut effekt i dBm."
+    ),
+    )
+    parser.add_argument(
+        "--load-ohm",
+        type=float,
+        default=50.0,
+        help="Lastimpedans i ohm som används för dBm-beräkning (standard 50 Ω).",
     )
 
 
