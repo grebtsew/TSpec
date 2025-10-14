@@ -35,6 +35,7 @@ soupy_available = False
 try:
     import SoapySDR
     from SoapySDR import *  # noqa
+
     soupy_available = True
 except ImportError:
     print("⚠️ SoapySDR not installed. SoupySDR input disabled.")
@@ -43,9 +44,10 @@ sock = None
 iqfile = None
 sdr = None
 
+
 def setup_format():
     global parse_module
-    
+
     if args.format.endswith(".py"):
         module_path = os.path.abspath(args.format)
         module_name = os.path.splitext(os.path.basename(module_path))[0]
@@ -64,9 +66,9 @@ def setup_format():
 
 def setup_input():
     global sock, protocol_handler, iqfile, sdr
-    
+
     if args.input.endswith(".py"):
-        
+
         module_path = os.path.abspath(args.input)
         module_name = os.path.splitext(os.path.basename(module_path))[0]
         spec = importlib.util.spec_from_file_location(module_name, module_path)
@@ -235,8 +237,8 @@ waterfall_counter = 0  # global
 
 
 def add_waterfall(power_db, freqs=None):
-    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX 
-    
+    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX
+
     waterfall_counter += 1
     if waterfall_counter < args.waterfall_speed:
         return  # hoppa över den här uppdateringen
@@ -249,8 +251,9 @@ def add_waterfall(power_db, freqs=None):
         norm = np.nan_to_num(norm, nan=0.0, posinf=1.0, neginf=0.0)
         norm = np.clip(norm, 0.0, 1.0)
 
-
-        levels = np.clip((power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1)
+        levels = np.clip(
+            (power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1
+        )
         levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
         levels = np.clip(levels, 0.0, 1.0)
 
@@ -258,12 +261,12 @@ def add_waterfall(power_db, freqs=None):
 
         for level_val in levels:
             # Gamma-korrigering
-            level_val_gamma = level_val ** gamma
+            level_val_gamma = level_val**gamma
 
             # Hämta färg från colormap
             base_idx = int(level_val_gamma * (len(COLORMAP_RGB) - 1))
             r, g, bb = COLORMAP_RGB[base_idx]
-            
+
             row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
     else:
         sorted_thresholds = sorted(THRESHOLDS.items())
@@ -287,15 +290,15 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
 
     min_db = args.db_min if args.db_min is not None else np.min(power_db)
     max_db = args.db_max if args.db_max is not None else np.max(power_db)
-    
+
     color_levels = np.clip(
-    (power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1
-    )   
+        (power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1
+    )
 
     levels = np.clip((power_db - min_db) / (max_db - min_db + 1e-12), 0, 1)
     levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
     levels = np.clip(levels, 0.0, 1.0)
-    
+
     if args.phosphor:
         global phosphor_levels
         decay = getattr(args, "phosphor_decay", 0.85)
@@ -304,7 +307,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         else:
             phosphor_levels = phosphor_levels * decay + levels * (1 - decay)
         levels = phosphor_levels
-    
+
     bars = (levels * (HEIGHT - 1)).astype(int)
 
     rows = []
@@ -314,7 +317,6 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     w = max(1, int(args.line_width))
     half = w // 2
 
-    
     for h in range(HEIGHT - 1, -1, -1):
         db_label = f"{min_db + h * step_db:5.1f} "
         row = [db_label]
@@ -328,7 +330,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                 if dist <= half or (b_left <= h <= b) or (b_right <= h <= b):
                     level_val = np.nan_to_num(color_levels[i], nan=0.0)  # NaN → 0
                     gamma = args.gamma if args.gamma is not None else 1.0
-                    level_val_gamma = level_val ** gamma
+                    level_val_gamma = level_val**gamma
                     base_idx = int(level_val_gamma * (len(COLORMAP_RGB) - 1))
                     r, g, bb = COLORMAP_RGB[base_idx]
 
@@ -336,20 +338,29 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                         vertical_dist = max(0, b - h)
                         fade = 1.0
                         if half > 0:
-                            fade = 1.0 - args.line_color_fade_strength  * min(dist, vertical_dist) / (half + 1e-12)
+                            fade = 1.0 - args.line_color_fade_strength * min(
+                                dist, vertical_dist
+                            ) / (half + 1e-12)
                     else:
                         fade = 1.0
                         if half > 0:
-                            fade = 1.0 - args.line_color_fade_strength  * dist / (half + 1e-12)
+                            fade = 1.0 - args.line_color_fade_strength * dist / (
+                                half + 1e-12
+                            )
 
                     # Clamp fade mellan 0 och 1 (kan bli helt svart)
                     fade = max(0.0, min(1.0, fade))
-                    
 
-                    # Applicera fade mot svart
-                    r_f = int(r * 255 * fade)
-                    g_f = int(g * 255 * fade)
-                    b_f = int(bb * 255 * fade)
+                    if args.fade_to_white:
+                        r_f = int((r * fade) * 255)
+                        g_f = int((g * fade) * 255)
+                        b_f = int((bb * fade) * 255)
+
+                    else:
+                        # Applicera fade mot svart
+                        r_f = int(r * 255 * fade)
+                        g_f = int(g * 255 * fade)
+                        b_f = int(bb * 255 * fade)
 
                     draw_symbol = symbol
                     # Lägg till feature-symbol på toppen av stapeln
@@ -362,7 +373,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                                         int(x) for x in args.feature_color.split(",")
                                     ]
                                 except:
-                                    
+
                                     r_fc, g_fc, b_fc = 255, 255, 255
                                 # Skriv över alla andra färger
                                 if args.spectrum_symbol_color_background:
@@ -450,7 +461,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     else:
         scale = 1e-6
         unit = "µHz"
-        
+
     # Kontrollera om tick-värdena blir > 999 (max 3 siffror)
     max_val = max(abs(f_min), abs(f_max)) / scale
     if max_val > 999:
@@ -661,7 +672,7 @@ def process_iq(iq_data, meta):
         if args.ref_voltage is not None:
             # Absolut effekt i dBm
             V_rms = np.abs(spectrum) * args.ref_voltage / np.sqrt(2)  # RMS
-            P_watt = (V_rms ** 2) / args.load_ohm
+            P_watt = (V_rms**2) / args.load_ohm
             P_mw = P_watt * 1000
             power_db = 10 * np.log10(P_mw + 1e-12)
         else:
@@ -674,12 +685,9 @@ def process_iq(iq_data, meta):
             if not args.no_normalize:
                 power_db = power_db - np.max(power_db)
 
- 
-        
-
-        #if args.db_min is not None:
+        # if args.db_min is not None:
         #    power_db = np.maximum(power_db, args.db_min)  # allt under db-min klipps
-        #if args.db_max is not None:
+        # if args.db_max is not None:
         #   power_db = np.minimum(power_db, args.db_max)  # allt över db-max klipps
 
         if args.agc:
@@ -696,12 +704,12 @@ def process_iq(iq_data, meta):
             power_db -= process_iq.agc_level
 
         # 4️⃣ Clip to db-min / db-max
-        #if args.db_min is not None:
+        # if args.db_min is not None:
         #    power_db = np.maximum(power_db, args.db_min)
-        #if args.db_max is not None:
+        # if args.db_max is not None:
         #    power_db = np.minimum(power_db, args.db_max)
         # f_min / f_max (behöver freqs här, därför inuti loopen)
-        
+
         f_min = args.freq_min if args.freq_min is not None else freqs[0]
         f_max = args.freq_max if args.freq_max is not None else freqs[-1]
 
@@ -736,7 +744,7 @@ def process_iq(iq_data, meta):
                         thresh = min_val + i * step
                         # Om thresh är NaN, ersätt med min_val
                         if np.isnan(thresh):
-                            thresh = 0  
+                            thresh = 0
                         new_thresholds[int(round(thresh))] = sym
                     THRESHOLDS = new_thresholds
 
@@ -832,17 +840,19 @@ def process_iq(iq_data, meta):
 
         # Visa peak i interpolationen# Hitta peak inom det zoomade fönstret
         peak_idx = np.argmax(power_zoom)
-        peak_power_db = power_zoom[peak_idx]  
+        peak_power_db = power_zoom[peak_idx]
         peak_freq = freqs_zoom[peak_idx]
 
-        if args.freq_min is None or args.freq_max is None or args.freq_max == args.freq_min:
+        if (
+            args.freq_min is None
+            or args.freq_max is None
+            or args.freq_max == args.freq_min
+        ):
             peak_bin = WIDTH // 2  # visa mitt i displayen om fönstret ej giltigt
         else:
             freq_span = args.freq_max - args.freq_min
             peak_bin = int((peak_freq - args.freq_min) / freq_span * (WIDTH - 1))
             peak_bin = max(0, min(WIDTH - 1, peak_bin))  # clamp till [0, WIDTH-1]
-
-        
 
         if 0 <= peak_bin < WIDTH:
             interp[peak_bin] = max(interp[peak_bin], power_zoom[peak_idx])
@@ -891,9 +901,38 @@ def process_iq(iq_data, meta):
                 # Konvertera från dB till linjär skala för medelvärde
                 linear_power = 10 ** (visible_power / 10.0)
                 rssi_val = 10 * np.log10(np.mean(linear_power) + 1e-12)
-                print(f"RSSI [{args.freq_min/1e6:.3f}-{args.freq_max/1e6:.3f} MHz]: {rssi_val:.2f} dB                        ")
+                print(
+                    f"RSSI [{args.freq_min/1e6:.3f}-{args.freq_max/1e6:.3f} MHz]: {rssi_val:.2f} dB                        "
+                )
             else:
                 print("RSSI: (inget inom valt frekvensspann)")
+
+        if args.snr:
+            # Begränsa till synligt frekvensfönster
+            mask = (bins >= args.freq_min) & (bins <= args.freq_max)
+            visible_bins = bins[mask]
+            visible_power = interp[mask]
+
+            if len(visible_power) > 0:
+                # Omvandla dB → linjär effekt
+                linear_power = 10 ** (visible_power / 10.0)
+
+                # Hitta peak (signal)
+                signal_idx = np.argmax(linear_power)
+                signal_power = np.mean(
+                    linear_power[max(0, signal_idx - 2) : signal_idx + 3]
+                )  # medel kring toppen
+
+                # Brusnivå: medel över de lägsta 20% av effekterna
+                sorted_power = np.sort(linear_power)
+                noise_floor = np.mean(sorted_power[: max(1, len(sorted_power) // 5)])
+
+                snr_val = 10 * np.log10(signal_power / (noise_floor + 1e-12) + 1e-12)
+                print(
+                    f"SNR [{args.freq_min/1e6:.3f}-{args.freq_max/1e6:.3f} MHz]: {snr_val:.2f} dB"
+                )
+            else:
+                print("SNR: (inget inom valt frekvensspann)")
 
         if not args.hide_spectrum:
             print("Spectrum (dB):")
@@ -918,14 +957,14 @@ def main():
 
     logging.info(f"Format {args.format}")
     logging.info(f"Parser {args.input}")
-    
+
     print(f"Format {args.format}")
     print(f"Parser {args.input}")
-    
+
     print(f"Default: {args.address}:{args.port}")
 
     print(f"Expecting format: {args.format}")
-    
+
     setup_input()
     setup_format()
 
@@ -935,7 +974,7 @@ def main():
                 if protocol_handler:
                     # Custom protocol provides its own data-fetching logic
                     data = protocol_handler.get_data()
-                    
+
                 elif args.input == "udp":
                     data, _ = sock.recvfrom(BUFFER_SIZE)
                 elif args.input == "iqfile":
@@ -943,7 +982,9 @@ def main():
                         raise ValueError("❌ iqfile not opened correctly!")
 
                     # Läs en chunk
-                    block_size = getattr(args, "block_size", None) or args.packet_size    # antal komplexa sampel per chunk
+                    block_size = (
+                        getattr(args, "block_size", None) or args.packet_size
+                    )  # antal komplexa sampel per chunk
                     print(block_size)
                     chunk_size = block_size * 2 * 4  # I + Q, float32
                     data = iqfile.read(chunk_size)
@@ -1051,9 +1092,7 @@ def main():
 
             elif args.format.endswith(".py"):
                 if not parse_module:
-                    print(
-                        "⚠️ No parse module loaded. Use --format ./path/to/parser.py"
-                    )
+                    print("⚠️ No parse module loaded. Use --format ./path/to/parser.py")
                     continue
 
                 try:
@@ -1081,8 +1120,6 @@ def main():
         if args.store:
             store_file.close()
             print(f"IQ-data sparad till {args.store}")
-
-
 
 
 def get_key():
@@ -1119,11 +1156,10 @@ def handle_key_press(freqs):
         if args.freq_min is None or args.freq_max is None:
             args.freq_min = freqs[0]
             args.freq_max = freqs[-1]
-        
+
         span = args.freq_max - args.freq_min
         freq_mid = (args.freq_max + args.freq_min) / 2
 
-        
         db_span = args.db_max - args.db_min
         db_mid = (args.db_max + args.db_min) / 2
 
@@ -1158,7 +1194,7 @@ def handle_key_press(freqs):
         elif key == ".":
             db_span *= 1.1
             args.db_min = db_mid - db_span / 2
-            args.db_max = db_mid + db_span / 2    
+            args.db_max = db_mid + db_span / 2
         elif key == "f":  # autozoom en gång
             args.auto_zoom = True
             args.auto_zoom_iterations += 1
@@ -1231,6 +1267,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--snr",
+        action="store_true",
+        help="Beräkna SNR (signal-to-noise ratio) inom aktuellt frekvensspann",
+    )
+
+    parser.add_argument(
         "--rssi",
         action="store_true",
         help="Display received signal strength (RSSI) in dB instead of full spectrum",
@@ -1291,12 +1333,11 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-    "--packet-size",
-    type=int,
-    default=4096,
-    help="Number of complex IQ samples to read per chunk from file"
+        "--packet-size",
+        type=int,
+        default=4096,
+        help="Number of complex IQ samples to read per chunk from file",
     )
-
 
     parser.add_argument(
         "--store",
@@ -1537,7 +1578,6 @@ if __name__ == "__main__":
         help="Path to iq data stream file.",
     )
 
-
     parser.add_argument(
         "--clear-on-new-frame",
         type=bool,
@@ -1576,16 +1616,28 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--fade-to-white",
+        action="store_true",
+        help="Fade spectrum lines to white.",
+    )
+
+    parser.add_argument(
         "--maxhold",
         action="store_true",
         help="Show maximum value per bin across frames instead of current spectrum",
     )
 
-    parser.add_argument("--phosphor", action="store_true",
-                    help="Enable CRT-style phosphor persistence effect on spectrum")
-    parser.add_argument("--phosphor-decay", type=float, default=0.85,
-                    help="Decay factor for phosphor effect (0.0–1.0, lower = faster fade)")
-
+    parser.add_argument(
+        "--phosphor",
+        action="store_true",
+        help="Enable CRT-style phosphor persistence effect on spectrum",
+    )
+    parser.add_argument(
+        "--phosphor-decay",
+        type=float,
+        default=0.85,
+        help="Decay factor for phosphor effect (0.0–1.0, lower = faster fade)",
+    )
 
     parser.add_argument(
         "--feature-symbol",
@@ -1607,13 +1659,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-    "--ref-voltage",
-    type=float,
-    default=None,
-    help=(
-        "Referens RMS-spänning för enhetsamplitud (float32) i volt. "
-        "Behövs för att beräkna absolut effekt i dBm."
-    ),
+        "--ref-voltage",
+        type=float,
+        default=None,
+        help=(
+            "Referens RMS-spänning för enhetsamplitud (float32) i volt. "
+            "Behövs för att beräkna absolut effekt i dBm."
+        ),
     )
     parser.add_argument(
         "--load-ohm",
@@ -1621,7 +1673,6 @@ if __name__ == "__main__":
         default=50.0,
         help="Lastimpedans i ohm som används för dBm-beräkning (standard 50 Ω).",
     )
-
 
     parser.add_argument(
         "--feature-color",
@@ -1647,7 +1698,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--driver", type=str, default="rtlsdr", help="Name of soupySDR driver to use."
     )
-    
+
     parser.add_argument(
         "--db-min", type=float, default=-80, help="Minimum dB level for display"
     )
@@ -1661,10 +1712,8 @@ if __name__ == "__main__":
     WIDTH = args.bins
     COLORMAP_RGB = get_colormap_rgb(args.colormap)
 
-
     GLOBAL_DB_MAX = args.db_max
     GLOBAL_DB_MIN = args.db_min
-    
 
     if args.log:
         logging.basicConfig(

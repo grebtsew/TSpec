@@ -11,9 +11,9 @@ import json
 import sys
 import os
 
-SAMPLE_RATE = 48000       # Hz
-PACKET_SIZE = 4096        # samples per chunk
-NOISE_LEVEL = 0.05        # Gaussian noise std
+SAMPLE_RATE = 48000  # Hz
+PACKET_SIZE = 4096  # samples per chunk
+NOISE_LEVEL = 0.05  # Gaussian noise std
 DELAY = PACKET_SIZE / SAMPLE_RATE  # seconds per chunk
 
 # Några realistiska toner
@@ -36,7 +36,9 @@ def generate_chunk():
         iq += amp * np.exp(1j * phases)
 
     # Lägg till Gaussian-brus
-    iq += NOISE_LEVEL * (np.random.randn(PACKET_SIZE) + 1j * np.random.randn(PACKET_SIZE))
+    iq += NOISE_LEVEL * (
+        np.random.randn(PACKET_SIZE) + 1j * np.random.randn(PACKET_SIZE)
+    )
 
     # Slumpmässiga “bursts”
     if np.random.rand() < 0.1:
@@ -51,11 +53,18 @@ def generate_chunk():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stream realistic synthetic IQ data to file")
-    parser.add_argument("--filepath", type=str, default="../simulation.iq",
-                        help="Output IQ file path")
-    parser.add_argument("--duration", type=float, default=None,
-                        help="Duration in seconds (optional, infinite if omitted)")
+    parser = argparse.ArgumentParser(
+        description="Stream realistic synthetic IQ data to file"
+    )
+    parser.add_argument(
+        "--filepath", type=str, default="../simulation.iq", help="Output IQ file path"
+    )
+    parser.add_argument(
+        "--duration",
+        type=float,
+        default=None,
+        help="Duration in seconds (optional, infinite if omitted)",
+    )
     args = parser.parse_args()
 
     iq_path = args.filepath
@@ -67,7 +76,7 @@ def main():
         "center_frequency": 0.0,
         "sample_rate": SAMPLE_RATE,
         "tone_freqs": TONE_FREQS,
-        "packet_size": PACKET_SIZE
+        "packet_size": PACKET_SIZE,
     }
     with open(meta_path, "w") as m:
         json.dump(meta, m, indent=2)

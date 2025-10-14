@@ -15,15 +15,29 @@ import uuid
 
 # --- Argumentparser ---
 parser = argparse.ArgumentParser(description="Stream SDR IQ samples via UDP")
-parser.add_argument("--driver", type=str, default="rtlsdr", help="SoapySDR driver, e.g. rtlsdr, hackrf, lime")
+parser.add_argument(
+    "--driver",
+    type=str,
+    default="rtlsdr",
+    help="SoapySDR driver, e.g. rtlsdr, hackrf, lime",
+)
 parser.add_argument("--host", type=str, default="127.0.0.1", help="Mottagarens IP")
 parser.add_argument("--port", type=int, default=5005, help="UDP-port")
 parser.add_argument("--samplerate", type=float, default=2.048e6, help="Samplerate [Hz]")
-parser.add_argument("--center-freq", type=float, default=100e6, help="Center frequency [Hz]")
+parser.add_argument(
+    "--center-freq", type=float, default=100e6, help="Center frequency [Hz]"
+)
 parser.add_argument("--gain", type=float, default=30, help="RX gain [dB]")
-parser.add_argument("--blocksize", type=int, default=4096, help="Antal sampel per UDP-paket")
+parser.add_argument(
+    "--blocksize", type=int, default=4096, help="Antal sampel per UDP-paket"
+)
 parser.add_argument("--metadata", type=int, default=1, help="Skicka metadata först")
-parser.add_argument("--send-rate", type=float, default=None, help="Manuell delay mellan paket (sek) — om SDR är snabb nog, lämna tomt")
+parser.add_argument(
+    "--send-rate",
+    type=float,
+    default=None,
+    help="Manuell delay mellan paket (sek) — om SDR är snabb nog, lämna tomt",
+)
 args = parser.parse_args()
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -54,7 +68,9 @@ try:
 except RuntimeError:
     print("⚠️ SDR gain not adjustable or unsupported for this driver.")
 
-print(f"✅ SDR configured: {args.samplerate/1e6:.2f} MS/s @ {args.center_freq/1e6:.2f} MHz, gain={args.gain} dB")
+print(
+    f"✅ SDR configured: {args.samplerate/1e6:.2f} MS/s @ {args.center_freq/1e6:.2f} MHz, gain={args.gain} dB"
+)
 
 # --- Setup stream ---
 rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
@@ -65,14 +81,16 @@ buf = np.empty(args.blocksize, np.complex64)
 if args.metadata == 1:
     send_metadata()
 
-print(f"🚀 Börjar sända IQ-data till {args.host}:{args.port} ... (Ctrl+C för att stoppa)")
+print(
+    f"🚀 Börjar sända IQ-data till {args.host}:{args.port} ... (Ctrl+C för att stoppa)"
+)
 
 # --- Huvudloop ---
 try:
     while True:
         sr = sdr.readStream(rx_stream, [buf], args.blocksize)
         if sr.ret > 0:
-            iq_block = buf[:sr.ret]
+            iq_block = buf[: sr.ret]
             iq_arr = np.zeros((sr.ret, 2), dtype=np.float32)
             iq_arr[:, 0] = np.real(iq_block)
             iq_arr[:, 1] = np.imag(iq_block)
