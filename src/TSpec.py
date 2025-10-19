@@ -13,8 +13,12 @@ import importlib.util
 
 protocol_handler = None
 
-GLOBAL_DB_MIN = -100
+GLOBAL_DB_MIN = -120
 GLOBAL_DB_MAX = 0
+
+
+CONST_GLOBAL_DB_MIN = -120
+CONST_GLOBAL_DB_MAX = 0
 
 parse_module = None
 
@@ -25,7 +29,7 @@ stored_meta = None
 args = None
 
 # --- Defaultvalues ---
-DEFAULT_THRESHOLDS = {-80: " ", -72: "-", -50: "|"}
+DEFAULT_THRESHOLDS = {-100: " ", -90: "-", -50: "|"}
 maxhold_spectrum = None
 THRESHOLDS = None
 
@@ -237,7 +241,7 @@ waterfall_counter = 0  # global
 
 
 def add_waterfall(power_db, freqs=None):
-    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX
+    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, THRESHOLDS
 
     waterfall_counter += 1
     if waterfall_counter < args.waterfall_speed:
@@ -259,7 +263,7 @@ def add_waterfall(power_db, freqs=None):
 
         gamma = args.gamma if args.gamma is not None else 1.0
 
-        for level_val in levels:
+        for i, level_val in enumerate(levels):
             # Gamma-korrigering
             level_val_gamma = level_val**gamma
 
@@ -267,7 +271,18 @@ def add_waterfall(power_db, freqs=None):
             base_idx = int(level_val_gamma * (len(COLORMAP_RGB) - 1))
             r, g, bb = COLORMAP_RGB[base_idx]
 
-            row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
+            if args.waterfall_symbol_color_background:
+                row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
+            else:
+                sorted_thresholds = sorted(THRESHOLDS.items())
+                symbol = " "
+                for thresh, sym in sorted_thresholds:
+                    if power_db[i]   >= thresh:
+                        symbol = sym
+                    
+                row.append(f"\x1b[38;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{symbol}\x1b[0m")
+            
+            
     else:
         sorted_thresholds = sorted(THRESHOLDS.items())
         for p in power_db:
@@ -276,11 +291,12 @@ def add_waterfall(power_db, freqs=None):
                 if p >= thresh:
                     symbol = sym
             row.append(symbol)
+
     waterfall.append("".join(row))
 
 
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
-    global COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX
+    global COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, THRESHOLDS
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
 
     if f_min is None:
@@ -309,7 +325,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         levels = phosphor_levels
 
     bars = (levels * (HEIGHT - 1)).astype(int)
-
+    sorted_thresholds = sorted(THRESHOLDS.items())
     rows = []
     symbol = args.spectrum_symbol
     step_db = (max_db - min_db) / (HEIGHT - 1)
@@ -363,6 +379,8 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
                         b_f = int(bb * 255 * fade)
 
                     draw_symbol = symbol
+
+                           
                     # Lägg till feature-symbol på toppen av stapeln
                     if args.feature_symbol is not None:
                         if feature_flags is not None and feature_flags[i] and h == b:
@@ -398,6 +416,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         else:
             for i, b in enumerate(bars):
                 draw_symbol = symbol
+                
                 if b >= h:
                     if args.color_spectrum:
                         idx = b * len(COLORMAP_RGB) // HEIGHT
@@ -658,8 +677,13 @@ def process_iq(iq_data, meta):
             )
         block_for_fft[:win_len] *= win
 
+        # --- Lägg till fönsterkorrigering här ---
+        if not args.window_rms:
+            win_correction = np.sqrt(np.sum(win**2))
+            block_for_fft /= win_correction
+
         # FFT + frekvensaxel
-        spectrum = np.fft.fftshift(np.fft.fft(block_for_fft, n=fft_size))
+        spectrum = np.fft.fftshift(np.fft.fft(block_for_fft, n=fft_size) / fft_size)
         freq_offset = getattr(args, "freq_offset", 0.0)
         freqs = (
             np.fft.fftshift(np.fft.fftfreq(fft_size, 1 / meta["sample_rate"]))
@@ -682,7 +706,7 @@ def process_iq(iq_data, meta):
             else:
                 power_db = 20 * np.log10(np.abs(spectrum) + 1e-12)
 
-            if not args.no_normalize:
+            if args.normalize_zero:
                 power_db = power_db - np.max(power_db)
 
         # if args.db_min is not None:
@@ -1148,7 +1172,7 @@ def get_key():
 
 
 def handle_key_press(freqs):
-    global maxhold_spectrum, prev_interp, autozoom_count, COLORMAP_RGB
+    global maxhold_spectrum, prev_interp, autozoom_count, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, CONST_GLOBAL_DB_MIN, CONST_GLOBAL_DB_MAX
     key = get_key()
 
     if key:
@@ -1203,6 +1227,9 @@ def handle_key_press(freqs):
                 args.colormap = "custom"
                 args.custom_colormap = f"{random_hex_color()},{random_hex_color()},64"
                 COLORMAP_RGB = get_colormap_rgb(args.colormap)
+        elif key == "z":  # recalibrate colors to current view
+            GLOBAL_DB_MAX = args.db_max
+            GLOBAL_DB_MIN = args.db_min
         elif key == "c":  # clear
             # clear old
             sys.stdout.write("\x1b[2J\x1b[H")
@@ -1213,10 +1240,12 @@ def handle_key_press(freqs):
         elif key == "r":  # reset
             args.freq_min = None
             args.freq_max = None
-            args.db_min = -80
-            args.db_max = 0
             maxhold_spectrum = None
             prev_interp = None
+            GLOBAL_DB_MAX = CONST_GLOBAL_DB_MAX
+            GLOBAL_DB_MIN = CONST_GLOBAL_DB_MIN
+            args.db_min = CONST_GLOBAL_DB_MIN
+            args.db_max = CONST_GLOBAL_DB_MAX
 
         elif key in "0123456789":
             if key == "0":
@@ -1359,6 +1388,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Automatically calculate noise floor and zoom to the area where signals exist",
     )
+
+    
+    parser.add_argument(
+        "--window-rms",
+        action="store_true",
+        help="Window correction RMS on w[n].",
+    )
+
+    
     parser.add_argument(
         "--auto-zoom-threshold",
         type=float,
@@ -1460,7 +1498,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--no-normalize",
+        "--waterfall-symbol-color-background",
+        action="store_true",
+        help="Draw waterfall color only.",
+    )
+
+    parser.add_argument(
+        "--normalize-zero",
         action="store_true",
         help="Don't normalize spectrum to 0 dB max",
     )
@@ -1585,6 +1629,15 @@ if __name__ == "__main__":
         help="Determine if to clear terminal each frame. This might cause flimmer.",
     )
 
+
+    parser.add_argument(
+        "--spectrum-single-symbol",
+        action="store_true",
+        help="Use only chosen symbol in spectrum. Else use waterfall scheme.",
+    )
+
+    
+
     parser.add_argument(
         "--gamma",
         type=float,
@@ -1700,7 +1753,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "--db-min", type=float, default=-80, help="Minimum dB level for display"
+        "--db-min", type=float, default=-120, help="Minimum dB level for display"
     )
     parser.add_argument(
         "--db-max", type=float, default=0, help="Maximum dB level for display"
@@ -1714,6 +1767,8 @@ if __name__ == "__main__":
 
     GLOBAL_DB_MAX = args.db_max
     GLOBAL_DB_MIN = args.db_min
+    CONST_GLOBAL_DB_MIN= args.db_min
+    CONST_GLOBAL_DB_MAX = args.db_max
 
     if args.log:
         logging.basicConfig(
