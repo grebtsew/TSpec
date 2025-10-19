@@ -678,7 +678,7 @@ def process_iq(iq_data, meta):
         block_for_fft[:win_len] *= win
 
         # --- Lägg till fönsterkorrigering här ---
-        if not args.window_rms:
+        if not args.no_window_rms:
             win_correction = np.sqrt(np.sum(win**2))
             block_for_fft /= win_correction
 
@@ -1391,7 +1391,7 @@ if __name__ == "__main__":
 
     
     parser.add_argument(
-        "--window-rms",
+        "--no-window-rms",
         action="store_true",
         help="Window correction RMS on w[n].",
     )
