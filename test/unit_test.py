@@ -18,8 +18,14 @@ def setup_fake_args():
 
     app.args = SimpleNamespace(
         line=False,
+        phosphor=False,
         bar=True,
+        snr=True,
+        no_window_rms=True,
+        ref_voltage=None,
+        normalize_zero=False,
         color_waterfall=False,
+        peak_preserve=0.1,
         color_spectrum=False,
         store=None,
         load=None,

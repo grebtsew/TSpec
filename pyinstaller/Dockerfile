@@ -21,4 +21,4 @@
     
     # --- Kör PyInstaller build som standard ---
     ENTRYPOINT ["pyinstaller", "--onefile", "TSpec.py"]
-    
+    # TODO: felsök!

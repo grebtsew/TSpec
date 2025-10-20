@@ -1,6 +1,10 @@
 # Changelog
 
-## [1.1.0] - 2025-10-04
+## [] - future work
+
+- Added Deb package building for future apt-get package, follow debian policy
+
+## [1.1.0] - 2025-10-20
 
 Second version, with added quality of life features and general radio controls using soupySDR.
 
@@ -14,11 +18,13 @@ Second version, with added quality of life features and general radio controls u
 
 ### Changed
 - Fixed correct scaling, fft/fft_length
+- Set min-max db per default
+- Updated link to release in readme file
+- Added color freq and time derivate
+
+
 
 TODO:
-- Added animation symbol and color solution, highlight of data derivate
-
-- Added Deb package building for future apt-get package, follow debian policy
 - Added documentation about creation of parsing-modules
 
 
@@ -26,13 +32,10 @@ hw-
 - Added example sweeping rtl-sdr 
 - Added soupy-sdr controls
 - Added tcp support for rtl_tcp
+- gnuradio example
 
-TODO: gnuradio example
 
 
-### Changed
-- Set min-max db per default
-- Updated link to release in readme file
 
 ## [1.0.0] - 2025-10-01
 

@@ -241,7 +241,7 @@ waterfall_counter = 0  # global
 
 
 def add_waterfall(power_db, freqs=None):
-    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, THRESHOLDS
+    global waterfall_counter, COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, THRESHOLDS, prev_power_db
 
     waterfall_counter += 1
     if waterfall_counter < args.waterfall_speed:
@@ -261,9 +261,39 @@ def add_waterfall(power_db, freqs=None):
         levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
         levels = np.clip(levels, 0.0, 1.0)
 
+        if getattr(args, "color_freq_derivate", False):
+            # 🔹 Färglägg efter lutning (positiv/negativ förändring)
+            deriv = np.gradient(power_db)
+            deriv_norm = np.tanh(deriv / (np.std(deriv) + 1e-12))
+            color_levels = (deriv_norm + 1) / 2.0
+
+        elif getattr(args, "color_freq_intensity_change", False):
+            # 🔹 Färglägg efter hur mycket signalen förändras (utan riktning)
+            change = np.abs(np.gradient(power_db))
+            change_norm = np.clip(change / (np.max(change) + 1e-12), 0, 1)
+            color_levels = change_norm
+
+        elif getattr(args, "color_time_derivate", False):
+            if (
+                "prev_power_db" in globals()
+                and prev_power_db is not None
+                and len(prev_power_db) == len(power_db)
+            ):
+                # Temporal derivative: change between frames
+                deriv = power_db - prev_power_db
+                deriv_norm = np.tanh(deriv / (np.std(deriv) + 1e-12))
+                color_levels = (deriv_norm + 1) / 2.0
+            else:
+                # Ingen tidigare frame – ingen färg
+                color_levels = np.zeros_like(power_db)
+
+        else:
+            # 🔹 Standard – färg efter faktisk amplitudnivå
+            color_levels = levels
+
         gamma = args.gamma if args.gamma is not None else 1.0
 
-        for i, level_val in enumerate(levels):
+        for i, level_val in enumerate(color_levels):
             # Gamma-korrigering
             level_val_gamma = level_val**gamma
 
@@ -272,17 +302,20 @@ def add_waterfall(power_db, freqs=None):
             r, g, bb = COLORMAP_RGB[base_idx]
 
             if args.waterfall_symbol_color_background:
-                row.append(f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m")
+                row.append(
+                    f"\x1b[48;2;{int(r*255)};{int(g*255)};{int(bb*255)}m \x1b[0m"
+                )
             else:
                 sorted_thresholds = sorted(THRESHOLDS.items())
                 symbol = " "
                 for thresh, sym in sorted_thresholds:
-                    if power_db[i]   >= thresh:
+                    if power_db[i] >= thresh:
                         symbol = sym
-                    
-                row.append(f"\x1b[38;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{symbol}\x1b[0m")
-            
-            
+
+                row.append(
+                    f"\x1b[38;2;{int(r*255)};{int(g*255)};{int(bb*255)}m{symbol}\x1b[0m"
+                )
+
     else:
         sorted_thresholds = sorted(THRESHOLDS.items())
         for p in power_db:
@@ -296,7 +329,7 @@ def add_waterfall(power_db, freqs=None):
 
 
 def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=None):
-    global COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, THRESHOLDS
+    global COLORMAP_RGB, GLOBAL_DB_MIN, GLOBAL_DB_MAX, THRESHOLDS, prev_power_db
     HEIGHT = args.spectrum_height  # använd argumentet istället för global HEIGHT
 
     if f_min is None:
@@ -307,9 +340,38 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
     min_db = args.db_min if args.db_min is not None else np.min(power_db)
     max_db = args.db_max if args.db_max is not None else np.max(power_db)
 
-    color_levels = np.clip(
-        (power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1
-    )
+    if getattr(args, "color_freq_derivate", False):
+        # Färglägg efter lutning (riktning på förändring)
+        deriv = np.gradient(power_db)
+        deriv_norm = np.tanh(deriv / (np.std(deriv) + 1e-12))
+        color_levels = (deriv_norm + 1) / 2.0
+
+    elif getattr(args, "color_freq_intensity_change", False):
+        # Färglägg efter hur mycket värden ändras (absolut förändring)
+        change = np.abs(np.gradient(power_db))
+        change_norm = np.clip(change / (np.max(change) + 1e-12), 0, 1)
+        color_levels = change_norm
+
+    elif getattr(args, "color_time_derivate", False):
+        # Färglägg efter temporal förändring (frame-till-frame)
+        if (
+            "prev_power_db" in globals()
+            and prev_power_db is not None
+            and len(prev_power_db) == len(power_db)
+        ):
+            deriv = power_db - prev_power_db
+            deriv_norm = np.tanh(deriv / (np.std(deriv) + 1e-12))
+            color_levels = (deriv_norm + 1) / 2.0
+        else:
+            color_levels = np.zeros_like(power_db)  # första frame
+        # spara nuvarande frame för nästa iteration
+        prev_power_db = power_db.copy()
+
+    else:
+        # Standard – färg baserat på amplitudnivå
+        color_levels = np.clip(
+            (power_db - GLOBAL_DB_MIN) / (GLOBAL_DB_MAX - GLOBAL_DB_MIN + 1e-12), 0, 1
+        )
 
     levels = np.clip((power_db - min_db) / (max_db - min_db + 1e-12), 0, 1)
     levels = np.nan_to_num(levels, nan=0.0, posinf=1.0, neginf=0.0)
@@ -380,7 +442,6 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
 
                     draw_symbol = symbol
 
-                           
                     # Lägg till feature-symbol på toppen av stapeln
                     if args.feature_symbol is not None:
                         if feature_flags is not None and feature_flags[i] and h == b:
@@ -416,7 +477,7 @@ def vertical_spectrum(power_db, freqs, f_min=None, f_max=None, feature_flags=Non
         else:
             for i, b in enumerate(bars):
                 draw_symbol = symbol
-                
+
                 if b >= h:
                     if args.color_spectrum:
                         idx = b * len(COLORMAP_RGB) // HEIGHT
@@ -1389,14 +1450,12 @@ if __name__ == "__main__":
         help="Automatically calculate noise floor and zoom to the area where signals exist",
     )
 
-    
     parser.add_argument(
         "--no-window-rms",
         action="store_true",
         help="Window correction RMS on w[n].",
     )
 
-    
     parser.add_argument(
         "--auto-zoom-threshold",
         type=float,
@@ -1629,14 +1688,11 @@ if __name__ == "__main__":
         help="Determine if to clear terminal each frame. This might cause flimmer.",
     )
 
-
     parser.add_argument(
         "--spectrum-single-symbol",
         action="store_true",
         help="Use only chosen symbol in spectrum. Else use waterfall scheme.",
     )
-
-    
 
     parser.add_argument(
         "--gamma",
@@ -1672,6 +1728,24 @@ if __name__ == "__main__":
         "--fade-to-white",
         action="store_true",
         help="Fade spectrum lines to white.",
+    )
+
+    parser.add_argument(
+        "--color-freq-intensity-change",
+        action="store_true",
+        help="Color set by spectrum intensity change.",
+    )
+
+    parser.add_argument(
+        "--color-time-derivate",
+        action="store_true",
+        help="Color set by temporal derivative (change between frames).",
+    )
+
+    parser.add_argument(
+        "--color-freq-derivate",
+        action="store_true",
+        help="Color set by spectrum derivate.",
     )
 
     parser.add_argument(
@@ -1767,7 +1841,7 @@ if __name__ == "__main__":
 
     GLOBAL_DB_MAX = args.db_max
     GLOBAL_DB_MIN = args.db_min
-    CONST_GLOBAL_DB_MIN= args.db_min
+    CONST_GLOBAL_DB_MIN = args.db_min
     CONST_GLOBAL_DB_MAX = args.db_max
 
     if args.log:
