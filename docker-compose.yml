@@ -5,10 +5,14 @@ services:
     build: .
     container_name: tspec
     restart: unless-stopped
+    stdin_open: true
     tty: true
     ports:
       - "5005:5005/udp"
-    command: python TSpec.py --address 0.0.0.0 --port 5005 --refresh-rate 1 --color-waterfall --color-spectrum
+    # Using random data module
+    command: python ./src/TSpec.py --bins 80 --spectrum-height 10 --waterfall-height 5 --input ./modules/source/random_source_module.py --format ./modules/parse/custom_parser_module.py
+    # More live listening mode
+    #command: python ./src/TSpec.py --address 0.0.0.0 --port 5005 --refresh-rate 1 --color-waterfall --color-spectrum
 
 
 

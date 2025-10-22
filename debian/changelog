@@ -26,7 +26,8 @@ Second version, with added quality of life features and general radio controls u
 
 TODO:
 - Added documentation about creation of parsing-modules
-
+- Auto-recalibrate waterfall on received data levels
+- Fixa appropriate gain-level and check corresponding values
 
 hw-
 - Added example sweeping rtl-sdr 

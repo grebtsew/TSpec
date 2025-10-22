@@ -13,6 +13,8 @@ import importlib.util
 
 protocol_handler = None
 
+snr_val = None
+
 GLOBAL_DB_MIN = -120
 GLOBAL_DB_MAX = 0
 
@@ -96,6 +98,18 @@ def setup_input():
         sock.settimeout(3.0)
         print(f"✅ Listening on UDP {args.address}:{args.port}")
 
+    elif args.input.lower() == "tcp":
+        if not hasattr(args, "_tcp_server"):
+            # Skapa server första gången
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind((args.address, args.port))
+            sock.listen(1)
+            sock.settimeout(1.0)
+            
+            print(f"✅ TCP server listening on {args.address}:{args.port}")
+
+        
     # --- 3️⃣ IQ-fil ---
     elif args.input.lower() == "iqfile":
         if not args.iqfilepath:
@@ -105,20 +119,7 @@ def setup_input():
 
     # --- 4️⃣ SoapySDR (placeholder) ---
     elif args.input.lower() == "soapysdr":
-        try:
-            if not soupy_available:
-                print("❌ SoapySDR input requested but SoapySDR is not installed.")
-                sys.exit(1)
-            args.driver = getattr(args, "driver", f"driver={args.driver}")
-            sdr = SoapySDR.Device(args.driver)
-            sdr.setSampleRate(SOAPY_SDR_RX, 0, args.sample_rate)
-            sdr.setFrequency(SOAPY_SDR_RX, 0, args.center_frequency)
-            rxStream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
-            sdr.activateStream(rxStream)
-            print("✅ SoapySDR device active")
-        except ImportError:
-            raise ImportError("❌ SoapySDR not installed, run: pip install SoapySDR")
-
+        pass
 
 def hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip("#")
@@ -668,8 +669,9 @@ def load_iq_from_file():
                 time.sleep(args.refresh_rate)
 
 
+
 def process_iq(iq_data, meta):
-    global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta, autozoom_count
+    global prev_interp, last_update, THRESHOLDS, stored_iq, stored_meta, autozoom_count, snr_val
 
     if args.refresh_rate is not None:
         now = time.time()
@@ -729,6 +731,11 @@ def process_iq(iq_data, meta):
         else:
             win = np.ones(win_len)
 
+
+        
+        if args.dc_offset:
+            segment = segment - np.mean(segment)
+
         # Förbered block för FFT (trim/padda till fft_size om nödvändigt)
         block_for_fft = segment[:fft_size].copy()
         if len(block_for_fft) < win_len:
@@ -738,6 +745,7 @@ def process_iq(iq_data, meta):
             )
         block_for_fft[:win_len] *= win
 
+
         # --- Lägg till fönsterkorrigering här ---
         if not args.no_window_rms:
             win_correction = np.sqrt(np.sum(win**2))
@@ -745,6 +753,8 @@ def process_iq(iq_data, meta):
 
         # FFT + frekvensaxel
         spectrum = np.fft.fftshift(np.fft.fft(block_for_fft, n=fft_size) / fft_size)
+
+        
         freq_offset = getattr(args, "freq_offset", 0.0)
         freqs = (
             np.fft.fftshift(np.fft.fftfreq(fft_size, 1 / meta["sample_rate"]))
@@ -812,21 +822,36 @@ def process_iq(iq_data, meta):
                 span = auto_max - auto_min
                 args.freq_min = auto_min - 0.05 * span
                 args.freq_max = auto_max + 0.05 * span
+                args.db_max= np.max(power_db)*0.95
+                global snr_val
+                if snr_val is not None:
+                    args.db_min= args.db_max - snr_val*1.05
+                else:
+                    args.db_min= np.min(power_db)*0.90
             else:
                 args.freq_min, args.freq_max = freqs[0], freqs[-1]
 
             if THRESHOLDS == DEFAULT_THRESHOLDS:
                 symbols = list(DEFAULT_THRESHOLDS.values())
                 n = len(symbols)
+                
                 signal_mask = (freqs >= f_min) & (freqs <= f_max)
                 power_interval = power_db[signal_mask]
                 if len(power_interval) > 0:
                     min_val = np.min(power_interval)
                     max_val = np.max(power_interval)
+                    min_val = min_val + 2*(max_val - min_val)/3                    
                     step = (max_val - min_val) / n
+
                     new_thresholds = {}
                     for i, sym in enumerate(symbols):
-                        thresh = min_val + i * step
+                        if i == 0:
+                            thresh = min_val
+                        elif i == len(symbols)-1:
+                            thresh = max_val*1.02
+                        else:
+                            thresh = min_val + i * step
+                        
                         # Om thresh är NaN, ersätt med min_val
                         if np.isnan(thresh):
                             thresh = 0
@@ -1011,7 +1036,7 @@ def process_iq(iq_data, meta):
                 # Brusnivå: medel över de lägsta 20% av effekterna
                 sorted_power = np.sort(linear_power)
                 noise_floor = np.mean(sorted_power[: max(1, len(sorted_power) // 5)])
-
+                
                 snr_val = 10 * np.log10(signal_power / (noise_floor + 1e-12) + 1e-12)
                 print(
                     f"SNR [{args.freq_min/1e6:.3f}-{args.freq_max/1e6:.3f} MHz]: {snr_val:.2f} dB"
@@ -1028,6 +1053,36 @@ def process_iq(iq_data, meta):
         sys.stdout.flush()
 
 
+def soupy_init():
+    # --- Initiera SDR ---
+    print(f"🔧 Opening SoapySDR device: driver={args.driver}")
+    sdr = SoapySDR.Device({"driver": args.driver})
+
+    # Konfigurera
+    #sdr.setSampleRate(SOAPY_SDR_RX, 0, args.samplerate)
+    sdr.setFrequency(SOAPY_SDR_RX, 0, args.center_freq)
+    args.samplerate == sdr.getSampleRate(SOAPY_SDR_RX, 0)
+    # rtlsdr fix?
+    #sdr.setDCOffsetMode(SOAPY_SDR_RX, 0, True)
+    #sdr.setIQBalanceMode(SOAPY_SDR_RX, 0,True)
+    #sdr.setGainMode(SOAPY_SDR_RX, 0,True)
+    #sdr.setDCOffsetMode(SOAPY_SDR_RX, 0, True)
+    #sdr.setIQBalanceMode(SOAPY_SDR_RX, 0, True)
+    try:
+        sdr.setGain(SOAPY_SDR_RX, 0, args.gain)
+    except RuntimeError:
+        print("⚠️ SDR gain not adjustable or unsupported for this driver.")
+
+    print(f"✅ SDR configured: {args.samplerate/1e6:.2f} MS/s @ {args.center_freq/1e6:.2f} MHz, gain={args.gain} dB")
+
+    # --- Setup stream ---
+    rx_stream = sdr.setupStream(SOAPY_SDR_RX, SOAPY_SDR_CF32)
+    sdr.activateStream(rx_stream)
+    buf = np.empty(args.blocksize, np.complex64)
+    return rx_stream,sdr, buf
+
+
+
 def main():
     global iqfile
     logging.info(f"Starting system!")
@@ -1035,6 +1090,9 @@ def main():
 
     sys.stdout.write("\x1b[2J\x1b[H")
     sys.stdout.flush()
+
+    if args.input == "soupysdr":
+        rx_stream,sdr, buf = soupy_init()
 
     if args.load:
         load_iq_from_file()
@@ -1053,6 +1111,9 @@ def main():
     setup_input()
     setup_format()
 
+    last_metadata_time = time.time()
+    args._tcp_client = None
+
     try:
         while True:
             try:
@@ -1062,6 +1123,21 @@ def main():
 
                 elif args.input == "udp":
                     data, _ = sock.recvfrom(BUFFER_SIZE)
+                elif args.input == "tcp":
+                    # Vänta på anslutning om ingen klient finns
+                    if args._tcp_client is None:
+                        try:
+                            args._tcp_client, addr = sock.accept()
+                            print(f"✅ TCP client connected: {addr}")
+                            args._tcp_client.settimeout(1.0)
+                        except socket.timeout:
+                            continue
+
+                    # Läs data från klient
+                    data = args._tcp_client.recv(BUFFER_SIZE)
+                    if not data:
+                        continue
+
                 elif args.input == "iqfile":
                     if iqfile is None:
                         raise ValueError("❌ iqfile not opened correctly!")
@@ -1078,8 +1154,33 @@ def main():
                         iqfile.seek(0)
                         data = iqfile.read(chunk_size)
                 elif args.input == "soupysdr":
-                    # TODO:
-                    pass
+                    # --- Periodisk metadata ---
+                    now = time.time()
+                    if (now - last_metadata_time >= 10000):
+                        last_metadata_time= now
+                        data = json.dumps({
+                            "stream_id": "raw_stream",
+                            "center_frequency":args.center_freq,
+                            "sample_rate": args.samplerate,  # fallback
+                            }).encode("utf-8")
+                    else:
+
+                        # --- Läs SDR och skicka IQ ---
+                        sr = sdr.readStream(rx_stream, [buf], args.blocksize)
+                        if sr.ret > 0:
+                            iq_block = buf[:sr.ret]
+                            iq_arr = np.zeros((sr.ret, 2), dtype=np.float32)
+                            iq_arr[:, 0] = np.real(iq_block)
+                            iq_arr[:, 1] = np.imag(iq_block)
+                            data = iq_arr.tobytes()
+                        else:
+                            data = json.dumps({
+                            "stream_id": "raw_stream",
+                            "center_frequency":args.center_freq,
+                            "sample_rate": args.samplerate,  # fallback
+                            }).encode("utf-8")
+                            
+                            
 
             except socket.timeout:
                 continue
@@ -1124,7 +1225,11 @@ def main():
 
             elif args.format == "raw":
                 # Check for json start
+                
                 try:
+                    if len(data) % 8 != 0:
+                        continue  
+                
                     txt = data.decode("utf-8")
                     if txt.strip().startswith("{"):
                         meta_json = json.loads(txt)
@@ -1137,15 +1242,22 @@ def main():
                 iq_data = iq_arr[:, 0] + 1j * iq_arr[:, 1]
 
                 # Use latest metadat if exist
-                meta = stream_metadata.get(
-                    "raw_stream",
-                    {
-                        "stream_id": "raw_stream",
-                        "center_frequency": 0.0,
-                        "sample_rate": 48000.0,  # fallback
-                    },
+                if args.input == "soupysdr":
+                    meta = {
+                            "stream_id": "raw_stream",
+                            "center_frequency":args.center_freq,
+                            "sample_rate": args.samplerate,  # fallback
+                            }
+                else:
+                    meta = stream_metadata.get(
+                        "raw_stream",
+                        {
+                            "stream_id": "raw_stream",
+                            "center_frequency": args.center_freq,
+                            "sample_rate": args.samplerate,  # fallback
+                        },
                 )
-
+            
                 process_iq(iq_data, meta)
 
             elif args.format == "vita49":
@@ -1201,35 +1313,44 @@ def main():
             sock.close()
         if iqfile is not None:
             iqfile.close()
+        if args.input == "soupysdr":
+            sdr.deactivateStream(rx_stream)
+            sdr.closeStream(rx_stream)
+
+
         logging.info(f"Closing system!")
         if args.store:
             store_file.close()
             print(f"IQ-data sparad till {args.store}")
 
 
-def get_key():
-    """Returnerar en tangent om en är nedtryckt, annars None (ingen blockering)."""
-    if os.name == "nt":
-        import msvcrt
+if os.name == "nt":
+    import msvcrt
 
-        key = None
-        while msvcrt.kbhit():
-            key = msvcrt.getch().decode("utf-8", errors="ignore")
-        return key
-    else:  # Linux / macOS
-        import tty, termios
+    def get_key():
+        """Returnerar tangent som är aktivt nedtryckt just nu, annars None."""
+        if msvcrt.kbhit():
+            return msvcrt.getch().decode("utf-8", errors="ignore")
+        return None
 
-        key = None
+else:
+    import tty, termios, select
+
+    _old_term_settings = termios.tcgetattr(sys.stdin)
+    tty.setcbreak(sys.stdin.fileno())
+
+    import atexit
+    def _restore_terminal():
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _old_term_settings)
+    atexit.register(_restore_terminal)
+
+    def get_key():
+        """Returnerar tangent som är aktivt nedtryckt just nu, annars None."""
         dr, _, _ = select.select([sys.stdin], [], [], 0)
-        while dr:
-            old_settings = termios.tcgetattr(sys.stdin)
-            try:
-                tty.setcbreak(sys.stdin.fileno())
-                key = sys.stdin.read(1)
-            finally:
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-            dr, _, _ = select.select([sys.stdin], [], [], 0)
-        return key
+        if dr:
+            return sys.stdin.read(1)
+        return None
+
 
 
 def handle_key_press(freqs):
@@ -1489,7 +1610,7 @@ if __name__ == "__main__":
         "--port",
         type=int,
         default=5005,
-        help="UDP port for connecting to the radio device",
+        help="UDP/TCP port for connecting to the radio device",
     )
     parser.add_argument(
         "--format",
@@ -1604,6 +1725,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        "--dc-offset",
+        action="store_true",
+        help="Compensate for DC offset spikes.",
+    )
+
+    parser.add_argument(
         "--agc-speed",
         type=float,
         default=0.1,
@@ -1635,7 +1762,7 @@ if __name__ == "__main__":
         "--input",
         type=str,
         default="udp",
-        help="Input source: 'udp', 'iqfile', 'soupySDR' or path to a Python protocol module.",
+        help="Input source: 'udp','tcp', 'iqfile', 'soupysdr' or path to a Python protocol module.",
     )
     parser.add_argument("--file", type=str, help="Path to IQ file if using 'iqfile'.")
 
@@ -1825,6 +1952,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--driver", type=str, default="rtlsdr", help="Name of soupySDR driver to use."
     )
+
+    parser.add_argument("--samplerate", type=float, default=2.048e6, help="Samplerate [Hz]")
+    parser.add_argument("--center-freq", type=float, default=100e6, help="Center frequency [Hz]")
+    parser.add_argument("--gain", type=float, default=0, help="RX gain [dB]")
+    parser.add_argument("--blocksize", type=int, default=4096, help="Antal sampel per UDP/TCP-paket")
 
     parser.add_argument(
         "--db-min", type=float, default=-120, help="Minimum dB level for display"

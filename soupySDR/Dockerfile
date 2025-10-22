@@ -1,22 +1,16 @@
-# --- Basimage ---
-    FROM python:3.11-slim
+FROM ubuntu:24.04
 
-    # --- Installera systemberoenden ---
-    RUN apt-get update && \
-        apt-get install -y rtl-sdr libusb-1.0-0 git && \
-        apt-get clean && rm -rf /var/lib/apt/lists/*
-    
-    # --- Installera Pythonberoenden ---
-    COPY ./requirements.txt /requirements.txt
-    RUN pip install --no-cache-dir -r /requirements.txt
-    
-    # TODO: install soupysdr
-    # TODO: testrun
-    
-    WORKDIR /app
-    
-    COPY . .
-    
+# Install all
+COPY ./souptSDR/install_full.sh /install_full.sh
+RUN chmod +x /install_full.sh
+RUN /install_full.sh
 
-    CMD ["python3", "./src/TSpec.py"]
-    
+# Install python packages
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of your application
+COPY . .
+
+# Default command
+CMD ["python", "./src/TSpec.py" , "--address", "0.0.0.0"]

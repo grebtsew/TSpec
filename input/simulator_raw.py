@@ -31,14 +31,17 @@ args = parser.parse_args()
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+_id = uuid.uuid4().hex[:8]
 
 # --- Metadata ---
 def send_metadata():
+    global _id
     meta = {
-        "stream_id": "sim_raw_" + uuid.uuid4().hex[:8],
+        "stream_id": "sim_raw_" + _id,
         "center_frequency": args.center_freq,
         "sample_rate": args.samplerate,
     }
+
     sock.sendto(json.dumps(meta).encode("utf-8"), (args.host, args.port))
     print(f"Metadata skickad: {meta}")
     return meta["stream_id"]
@@ -53,7 +56,7 @@ def generate_iq(blocksize, samplerate, bandwidth=200e3):
     t = np.arange(blocksize) / samplerate
 
     # Bas-signal (konstant)
-    base_signal = np.exp(2j * np.pi * F_BASE * t)
+    base_signal = np.exp(2j * np.pi * (F_BASE+10e3) * t)
 
     # Slumpmässig signal som hoppar lite
     f_rand_small = np.random.uniform(-bandwidth / 4, bandwidth / 4)
@@ -86,6 +89,8 @@ def main():
     if args.metadata == 1:
         stream_id = send_metadata()
 
+    
+    latest = time.time()
     try:
         while True:
             iq_block = generate_iq(
@@ -93,6 +98,10 @@ def main():
             )
             sock.sendto(iq_block.tobytes(), (args.host, args.port))
             time.sleep(args.send_rate)
+            
+            if time.time() -  latest > 10:
+                send_metadata()
+                latest = time.time()
     except KeyboardInterrupt:
         print("\nAvslutar simulator...")
 

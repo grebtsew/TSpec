@@ -1,13 +1,13 @@
 version: "3.9"
 
 # Kör med:
-# docker-compose -f ./soupysdr/docker-compose.yml up --build
+# docker-compose -f ./soupySDR/docker-compose.yml up --build
 
 services:
   soupysdr:
     build:
-      context: ./
-      dockerfile: ./Dockerfile
+      context: ../
+      dockerfile: ./soupySDR/Dockerfile
     container_name: soupysdr
     privileged: true
     volumes:
